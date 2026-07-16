@@ -1,7 +1,7 @@
 // Preload exposes a tiny, typed surface to the renderer.
 // All sensitive work (LLM calls, file I/O) stays in main.
 import { contextBridge, ipcRenderer } from 'electron';
-import { IPC, AppConfig, ChatMessage, Reminder, PetPosition, PetBounds } from '../shared/types';
+import { IPC, AppConfig, ChatMessage, Reminder, PetPosition, PetBounds, NotifyPayload } from '../shared/types';
 
 const api = {
   config: {
@@ -71,6 +71,32 @@ const api = {
     snapshotBounds: (): Promise<PetBounds | null> => ipcRenderer.invoke(IPC.PET_SNAPSHOT_BOUNDS),
     restoreBounds: (bounds: PetBounds): Promise<PetBounds | null> =>
       ipcRenderer.invoke(IPC.PET_RESTORE_BOUNDS, bounds),
+  },
+  notify: {
+    /** Start the local HTTP server. Idempotent. */
+    enable: (): Promise<{ ok: boolean; running: boolean }> =>
+      ipcRenderer.invoke(IPC.NOTIFY_ENABLE),
+    /** Stop the local HTTP server. Idempotent. */
+    disable: (): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke(IPC.NOTIFY_DISABLE),
+    /** Install hooks into ~/.claude/settings.json. */
+    installHooks: (): Promise<{ ok: boolean; message: string }> =>
+      ipcRenderer.invoke(IPC.NOTIFY_INSTALL_HOOKS),
+    /** Remove our hooks from ~/.claude/settings.json. */
+    uninstallHooks: (): Promise<{ ok: boolean; message: string }> =>
+      ipcRenderer.invoke(IPC.NOTIFY_UNINSTALL_HOOKS),
+    /** Fire a synthetic notification for self-test. */
+    testNotify: (kind?: string): Promise<{ ok: boolean; message?: string }> =>
+      ipcRenderer.invoke(IPC.NOTIFY_TEST, kind),
+    /** Bring the pet window to the front. */
+    focusPet: (): Promise<{ ok: boolean } | null> =>
+      ipcRenderer.invoke(IPC.NOTIFY_FOCUS_PET),
+    /** Subscribe to incoming notifications. Returns an unsubscribe fn. */
+    onNotify: (handler: (payload: NotifyPayload) => void) => {
+      const listener = (_e: unknown, p: NotifyPayload) => handler(p);
+      ipcRenderer.on(IPC.NOTIFY_SHOW, listener);
+      return () => ipcRenderer.off(IPC.NOTIFY_SHOW, listener);
+    },
   },
 };
 
