@@ -1,0 +1,16 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+out/
+release/
+
+# Reminders service: SQLite files (db + journal + WAL) and any
+# out-of-band build output. `dist/` already covers dist/server/ but
+# these catch files that might end up in a developer's CWD by accident.
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+server/bin/
+server/coverage.out

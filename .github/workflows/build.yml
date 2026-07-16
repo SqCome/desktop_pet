@@ -1,0 +1,55 @@
+name: Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: npm ci
+      - run: npm run pack
+        env:
+          CSC_LINK: ''
+          CSC_KEY_PASSWORD: ''
+          ELECTRON_BUILDER_ALLOW_UNRESOLVED_DEPENDENCIES: 'true'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DesktopPet-Windows
+          path: release/*.exe
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.22' }
+      - run: npm ci
+      - run: npm run pack
+        env:
+          CSC_LINK: ''
+          CSC_KEY_PASSWORD: ''
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DesktopPet-macOS
+          path: release/*.dmg
+
+  # 编译 remindersd 服务端,跑在你公网服务器上(Linux amd64)
+  build-remindersd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.22' }
+      - run: cd server && go build -o remindersd-linux-amd64 ./cmd/remindersd
+      - uses: actions/upload-artifact@v4
+        with:
+          name: remindersd-linux
+          path: server/remindersd-linux-amd64

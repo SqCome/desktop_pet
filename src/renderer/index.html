@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+    <title>Desktop Pet</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <!-- Cubism 4 runtime (live2dcubismcore.min.js) — must be loaded before
+         the pixi-live2d-display/cubism4 module is initialized. Sits in
+         assets/runtime/ and gets copied to dist/renderer/assets/runtime/
+         by bundle-renderer.js. -->
+    <script src="./assets/runtime/live2dcubismcore.min.js"></script>
+  </head>
+  <body>
+    <div id="stage">
+      <!-- Pet render target. The renderer swaps its contents based on whether
+           a Live2D model is loaded or we fall back to a static image. -->
+      <div id="pet-canvas"></div>
+
+      <!-- Speech bubbles for the latest thinking + reply (transient). -->
+      <div id="bubble-stack" class="bubble-stack"></div>
+
+      <!-- Chat input row that lives just below the pet. Always visible
+           while the chat panel is open. -->
+      <div id="chat-panel" class="chat-panel hidden">
+        <input
+          id="chat-input"
+          type="text"
+          placeholder="跟宠物说点什么..."
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button id="chat-send" type="button">发送</button>
+        <button id="chat-stop" type="button" class="hidden">停止</button>
+      </div>
+
+      <!-- Chat history window: a full conversation log, scrollable.
+           Shown when the user clicks 📜 in the context menu. -->
+      <div id="chat-window" class="chat-window hidden">
+        <div class="chat-window-header">
+          <span class="chat-window-title">💬 与小柚的对话</span>
+          <button id="chat-window-close" class="chat-window-close" aria-label="关闭">×</button>
+        </div>
+        <div id="chat-window-messages" class="chat-window-messages"></div>
+      </div>
+
+      <!-- Settings window: lets the user change LLM provider, baseUrl,
+           apiKey, model. Same drawer pattern as chat-window. -->
+      <div id="settings-window" class="settings-window hidden">
+        <div class="chat-window-header">
+          <span class="chat-window-title">⚙ 设置</span>
+          <button id="settings-window-close" class="chat-window-close" aria-label="关闭">×</button>
+        </div>
+        <div class="settings-window-body">
+          <label class="settings-field">
+            <span>Provider</span>
+            <select id="settings-provider">
+              <option value="openai">OpenAI</option>
+              <option value="minimax">MiniMax</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+          <label class="settings-field">
+            <span>Base URL</span>
+            <input id="settings-baseUrl" type="text" autocomplete="off" spellcheck="false"
+                   placeholder="https://api.example.com/v1" />
+          </label>
+          <label class="settings-field">
+            <span>API Key</span>
+            <input id="settings-apiKey" type="password" autocomplete="off" spellcheck="false"
+                   placeholder="sk-..." />
+          </label>
+          <label class="settings-field">
+            <span>Model</span>
+            <input id="settings-model" type="text" autocomplete="off" spellcheck="false"
+                   placeholder="e.g. MiniMax-M3" />
+          </label>
+          <div class="settings-section-title">⏰ 跨设备提醒</div>
+          <label class="settings-field">
+            <span>提醒服务地址</span>
+            <input id="settings-remindersUrl" type="url" autocomplete="off" spellcheck="false"
+                   placeholder="https://your-domain.com" />
+          </label>
+          <label class="settings-field">
+            <span>提醒服务 Token</span>
+            <input id="settings-remindersToken" type="password" autocomplete="off" spellcheck="false"
+                   placeholder="Bearer token" />
+          </label>
+          <div class="settings-actions">
+            <button id="settings-save" class="settings-save">保存</button>
+            <span id="settings-status" class="settings-status"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Toolbar appears when the user right-clicks the pet. -->
+      <div id="menu" class="menu hidden">
+        <button data-action="chat">💬 聊天</button>
+        <button data-action="history">📜 历史</button>
+        <button data-action="reminder">⏰ 提醒</button>
+        <button data-action="weather">🌤 天气</button>
+        <button data-action="notes">📝 笔记</button>
+        <button data-action="settings">⚙ 设置</button>
+        <button data-action="quit">✕ 退出</button>
+      </div>
+    </div>
+
+    <script type="module" src="./index.js"></script>
+    <!-- After tsc emits CommonJS to dist/renderer, the renderer entry becomes
+         index.js. pixi-live2d-display is ESM and must keep its import shape. -->
+  </body>
+</html>

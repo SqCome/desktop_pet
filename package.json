@@ -1,0 +1,70 @@
+{
+  "name": "desktop-pet",
+  "version": "0.1.0",
+  "description": "A cross-platform desktop pet powered by Electron + Live2D + LLM",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "build:main": "tsc -p tsconfig.main.json",
+    "build:renderer": "node scripts/bundle-renderer.js",
+    "build:server": "cd server && go build -o ../dist/server/remindersd ./cmd/remindersd 2>nul || echo [remindersd] go not found, skipping",
+    "build": "npm run build:main && npm run build:renderer && npm run build:server",
+    "start": "npm run build && electron .",
+    "pack": "set CSC_LINK=&& set CSC_KEY_PASSWORD=&& set ELECTRON_BUILDER_ALLOW_UNRESOLVED_DEPENDENCIES=true&& set ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/&& npm run build&& electron-builder",
+    "clean": "rimraf dist"
+  },
+  "keywords": [
+    "desktop-pet",
+    "electron",
+    "live2d",
+    "llm"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "concurrently": "^8.2.2",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
+    "esbuild": "^0.20.0",
+    "rimraf": "^5.0.5",
+    "typescript": "^5.3.0",
+    "wait-on": "^7.2.0"
+  },
+  "dependencies": {
+    "pixi-live2d-display": "^0.4.0",
+    "pixi.js": "^6.5.10"
+  },
+  "build": {
+    "appId": "com.example.desktoppet",
+    "productName": "DesktopPet",
+    "copyright": "© 2026",
+    "asar": true,
+    "compression": "maximum",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "assets/**/*"
+    ],
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.entertainment",
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

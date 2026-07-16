@@ -1,0 +1,773 @@
+/* Transparent background so the OS desktop shows through. */
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+               "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#stage {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+}
+
+#pet-canvas {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  cursor: grab;
+  z-index: 1;
+}
+#pet-canvas.dragging { cursor: grabbing; }
+#pet-canvas.reminder-zoom {
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+  z-index: 5;
+}
+#pet-canvas.reminder-zoom > :first-child {
+  /* Use `transform: scale()` (not the standalone `scale` property) so
+     `transform-origin` actually applies — anchoring at 50% 85% keeps
+     the pet's feet in place while the head lifts up, so the zoom
+     reads as "standing up taller" instead of "exploding outward". */
+  transform: scale(1.4);
+  transform-origin: 50% 85%;
+  transition: transform 380ms cubic-bezier(0.2, 0.8, 0.2, 1),
+              filter 380ms ease;
+  filter: drop-shadow(0 0 24px rgba(255, 179, 198, 0.7))
+          drop-shadow(0 0 8px rgba(255, 209, 220, 0.9));
+  animation: reminder-bounce 600ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes reminder-bounce {
+  /* The keyframes nudge transform past scale(1.4) so the bounce
+     reads on top of the steady-state zoom. Using a separate
+     `scale` (multiplied) instead of `scale(1.4)` keeps the bounce
+     self-contained. */
+  0%   { transform: scale(1.05); }
+  55%  { transform: scale(1.50); }
+  100% { transform: scale(1.4); }
+}
+
+#pet-canvas .placeholder {
+  width: 200px;
+  height: 240px;
+  border-radius: 50% 50% 45% 45% / 60% 60% 40% 40%;
+  background: radial-gradient(circle at 35% 30%, #fff7c2, #ffd166 60%, #f4a261);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+  position: relative;
+  transition: transform 120ms ease, filter 300ms ease;
+}
+#pet-canvas:hover .placeholder { transform: translateY(-4px); }
+#pet-canvas .placeholder::before,
+#pet-canvas .placeholder::after {
+  content: '';
+  position: absolute;
+  top: 30%;
+  width: 14px;
+  height: 18px;
+  background: #222;
+  border-radius: 50%;
+}
+#pet-canvas .placeholder::before { left: 28%; }
+#pet-canvas .placeholder::after  { right: 28%; }
+
+/* Image-mode frames: fill the stage while preserving aspect ratio. */
+#pet-canvas .gif-frame,
+#pet-canvas .sequence-frame {
+  max-width: 90%;
+  max-height: 90%;
+  object-fit: contain;
+  pointer-events: none; /* canvas itself owns the pointer events */
+  filter: drop-shadow(0 6px 12px rgba(0,0,0,0.25));
+}
+
+/* Chat-style message stream — bubbles stack top-to-bottom, with the
+   newest reply at the bottom (just above the input bar). Use plain
+   `flex-direction: column` (NOT `column-reverse`): a reverse flex
+   container also flips main axis, which puts new DOM-appended bubbles
+   at the *top* of the column. With `justify-content: flex-end` a short
+   conversation sticks to the bottom edge, and a long one grows
+   upward — newest stays at the bottom, oldest scrolls off the top. */
+.bubble-stack {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 70px; /* above the chat-panel input bar (~60px tall + breathing room) */
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: stretch;
+  gap: 8px;
+  padding: 12px 16px;
+  /* Allow the column to grow tall when conversation is long. The pet
+     canvas occupies the lower half of the window; the top half is fair
+     game for bubbles. 70% of viewport height is generous without
+     covering the pet head. */
+  max-height: 70vh;
+  overflow-y: auto;
+  z-index: 6;
+  pointer-events: none;
+  scrollbar-width: none;
+}
+.bubble-stack::-webkit-scrollbar { display: none; }
+
+/* Individual bubble. role=user → right, default (assistant) → left.
+   Tail comes from ::before; corner radius is asymmetric so the tail
+   reads as a "speech bubble" pointing at the speaker. */
+.bubble {
+  position: relative;
+  display: inline-block;
+  width: fit-content;
+  max-width: 78%;
+  padding: 9px 13px;
+  border-radius: 16px;
+  font-size: 13px;
+  line-height: 1.55;
+  pointer-events: auto;
+  opacity: 0;
+  transform: translateY(8px) scale(0.96);
+  transition: opacity 200ms ease, transform 200ms ease;
+  white-space: pre-wrap;
+  word-break: break-word;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+}
+.bubble.role-assistant,
+.bubble:not(.role-user) {
+  align-self: flex-start;
+  background: rgba(255,255,255,0.96);
+  color: #333;
+  border-bottom-left-radius: 4px;
+}
+.bubble.role-user {
+  align-self: flex-end;
+  background: linear-gradient(135deg, #ffd1dc, #ffb3c6);
+  color: #6b2a3f;
+  border-bottom-right-radius: 4px;
+}
+.bubble.role-error {
+  align-self: flex-start;
+  background: rgba(255,235,235,0.98);
+  color: #c0392b;
+  border: 1px solid rgba(192,57,43,0.25);
+}
+.bubble.visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+/* Tail (speech-bubble pointer). Avoid SVG/clip-path — a tiny rotated
+   square behind the bubble is robust across GPU drivers and aligns with
+   the asymmetric corner radius. */
+.bubble.role-assistant::before,
+.bubble:not(.role-user):not(.role-error)::before {
+  content: '';
+  position: absolute;
+  left: -5px;
+  bottom: 6px;
+  width: 10px;
+  height: 10px;
+  background: rgba(255,255,255,0.96);
+  border-radius: 2px;
+  transform: rotate(45deg);
+  z-index: -1;
+}
+.bubble.role-user::before {
+  content: '';
+  position: absolute;
+  right: -5px;
+  bottom: 6px;
+  width: 10px;
+  height: 10px;
+  background: linear-gradient(135deg, #ffd1dc, #ffb3c6);
+  border-radius: 2px;
+  transform: rotate(45deg);
+  z-index: -1;
+}
+
+/* History fold chip — centered pill that summarizes older replies. */
+.bubble.history-chip {
+  align-self: center !important;
+  cursor: pointer;
+  padding: 6px 14px;
+  background: rgba(230,230,230,0.92);
+  color: #555;
+  font-size: 12px;
+  border-radius: 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+.bubble.history-chip::before { display: none; }
+.history-chip:hover { background: rgba(220,220,220,0.96); color: #333; }
+.history-chip .chip-text { display: inline-block; }
+
+.history-note {
+  background: rgba(245,245,220,0.96);
+  color: #6b6b3a;
+  font-size: 12px;
+}
+
+/* ----------------------------------------------------------------------
+   Chat history window — separate floating panel showing the full
+   conversation log. Scrollable, dismissable, lives to the side of the
+   pet so it doesn't crowd the bubble area.
+   ---------------------------------------------------------------------- */
+.chat-window {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 70%;
+  max-height: 480px;
+  background: rgba(252,252,252,0.92);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border-top-left-radius: 18px;
+  border-top-right-radius: 18px;
+  box-shadow: 0 -10px 32px rgba(0,0,0,0.18);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 10;
+  transform: translateY(100%);
+  transition: transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.chat-window:not(.hidden) { transform: translateY(0); }
+.chat-window.hidden { display: none; }
+.chat-window-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(245,245,245,0.96);
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  cursor: move;
+  user-select: none;
+}
+.chat-window-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+}
+.chat-window-close {
+  border: none;
+  background: transparent;
+  font-size: 18px;
+  color: #888;
+  cursor: pointer;
+  padding: 0 6px;
+  line-height: 1;
+}
+.chat-window-close:hover { color: #333; }
+
+.chat-window-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 18px 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  scrollbar-width: thin;
+}
+
+/* The chat-window messages mirror the bubble-stack palette so the two
+   UIs (above-head bubble vs. drawer history) read as one conversation. */
+.chat-window-messages .chat-msg.user {
+  background: linear-gradient(135deg, #ffd1dc, #ffb3c6);
+  color: #6b2a3f;
+  border-bottom-right-radius: 4px;
+}
+.chat-window-messages .chat-msg.assistant {
+  background: rgba(255,255,255,0.96);
+  color: #333;
+  border: 1px solid rgba(0,0,0,0.04);
+  border-bottom-left-radius: 4px;
+}
+
+/* ----------------------------------------------------------------------
+   Settings window — same drawer pattern as chat-window. Lets the user
+   change LLM provider / baseUrl / apiKey / model without leaving the app.
+   ---------------------------------------------------------------------- */
+.settings-window {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 70%;
+  max-height: 480px;
+  background: rgba(252,252,252,0.92);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border-top-left-radius: 18px;
+  border-top-right-radius: 18px;
+  box-shadow: 0 -10px 32px rgba(0,0,0,0.18);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 11; /* above chat-window if both are open */
+  transform: translateY(100%);
+  transition: transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.settings-window:not(.hidden) { transform: translateY(0); }
+.settings-window.hidden { display: none; }
+
+.settings-window-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: #2c2330;
+}
+.settings-field > span {
+  font-weight: 600;
+  font-size: 12px;
+  color: #6b2a3f;
+  letter-spacing: 0.02em;
+}
+.settings-field input,
+.settings-field select {
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(0,0,0,0.08);
+  background: rgba(255,255,255,0.85);
+  color: #2c2330;
+  outline: none;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+.settings-field input:focus,
+.settings-field select:focus {
+  border-color: #ffb3c6;
+  box-shadow: 0 0 0 3px rgba(255, 179, 198, 0.25);
+}
+.settings-field input::placeholder { color: #b09ba3; }
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+.settings-save {
+  border: none;
+  background: linear-gradient(135deg, #ffd1dc, #ffb3c6);
+  color: #6b2a3f;
+  padding: 9px 20px;
+  border-radius: 16px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(255, 138, 168, 0.5);
+  transition: transform 100ms ease, box-shadow 150ms ease;
+}
+.settings-save:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(255, 138, 168, 0.6);
+}
+.settings-save:active { transform: translateY(0); }
+.settings-save:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+.settings-status {
+  font-size: 12px;
+  color: #6b2a3f;
+  min-height: 16px;
+}
+.settings-status.error { color: #c0392b; }
+
+.settings-section-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #6b2a3f;
+  margin: 4px 0 2px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,179,198,0.3);
+}
+
+/* Individual message rows in the chat log. */
+.chat-msg {
+  max-width: 80%;
+  padding: 7px 11px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.chat-msg.user {
+  align-self: flex-end;
+  background: #5b8def;
+  color: white;
+  border-bottom-right-radius: 4px;
+}
+.chat-msg.assistant {
+  align-self: flex-start;
+  background: #fff;
+  color: #333;
+  border: 1px solid rgba(0,0,0,0.06);
+  border-bottom-left-radius: 4px;
+}
+.chat-msg.assistant.thinking { color: #888; font-style: italic; }
+.chat-msg.error {
+  align-self: flex-start;
+  background: rgba(255,235,235,0.98);
+  color: #c0392b;
+  border: 1px solid rgba(192,57,43,0.2);
+}
+.chat-msg.system {
+  align-self: center;
+  background: rgba(245,245,245,0.7);
+  color: #777;
+  font-size: 11px;
+  font-style: italic;
+  border: 1px dashed rgba(0,0,0,0.08);
+}
+
+/* Thinking state — animated dots come from JS, not a CSS pseudo-element.
+   (Pseudo-elements ::after wouldn't be cleared when we replace textContent,
+    leading to dots lingering after the real reply arrived.) */
+.bubble.thinking .bubble-text {
+  color: #666;
+}
+@keyframes dots {
+  0%, 20%   { opacity: 0.3; }
+  50%       { opacity: 1; }
+  80%, 100% { opacity: 0.3; }
+}
+.bubble.thinking .thinking-dots {
+  display: inline-block;
+  margin-left: 2px;
+  animation: dots 1s infinite;
+}
+
+/* Per-bubble close button. */
+.bubble .bubble-close {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  color: #888;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+.bubble:hover .bubble-close { opacity: 1; }
+.bubble .bubble-close:hover { color: #333; }
+
+.menu {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  /* Lift above #pet-canvas (z-index 1) and chat-window (z-index 10) so the
+     context menu buttons actually receive hits when the cursor is over
+     them. Without an explicit z-index the menu was a sibling of the
+     canvas and the lower-stacked hit area swallowed clicks. */
+  z-index: 100;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  background: rgba(255,255,255,0.96);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+  font-size: 13px;
+}
+.menu.hidden { display: none; }
+.menu button {
+  border: none;
+  background: transparent;
+  padding: 6px 10px;
+  text-align: left;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #333;
+}
+.menu button:hover { background: rgba(0,0,0,0.06); }
+
+/* Chat input bar — translucent pill that sits over the desktop, more
+   breathing room for longer Chinese prompts. Matches the user bubble
+   palette so the input feels like the same brand as sent messages. */
+.chat-panel {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 6px 14px;
+  background: rgba(255,255,255,0.82);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  border-radius: 22px;
+  box-shadow: 0 6px 22px rgba(0,0,0,0.18), inset 0 0 0 1px rgba(255,255,255,0.4);
+  width: min(420px, 70%);
+}
+.chat-panel.hidden { display: none; }
+.chat-panel input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  padding: 6px 6px;
+  font: inherit;
+  font-size: 13px;
+  color: #2c2330;
+}
+.chat-panel input::placeholder { color: #a0939b; }
+.chat-panel button {
+  border: none;
+  background: linear-gradient(135deg, #ffd1dc, #ffb3c6);
+  color: #6b2a3f;
+  padding: 7px 16px;
+  border-radius: 16px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(255, 138, 168, 0.5);
+  transition: transform 100ms ease, box-shadow 150ms ease;
+}
+.chat-panel button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(255, 138, 168, 0.6);
+}
+.chat-panel button:active { transform: translateY(0); }
+.chat-panel button.hidden { display: none; }
+.chat-panel #chat-stop { background: linear-gradient(135deg, #ffb4a2, #ff8a7a); color: #5a1d10; }
+
+/* Bubble close button — only visible when the user hovers the bubble. */
+.bubble-close {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  color: #888;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+.bubble:hover .bubble-close { opacity: 1; }
+.bubble-close:hover { color: #333; }
+
+/* ----------------------------------------------------------------------
+   Reminder card — single unified pill: [icon] text [ack button]
+   Anchored to the top of the window, above the (now-scaled) pet's
+   head. Three continuous animations:
+     1. entrance: slide+fade+bounce on appearance
+     2. ambient: gentle horizontal sway + glow pulse (the "shake" the
+        user asked for — slow enough not to be annoying, but always
+        moving so the eye is drawn back)
+     3. dismiss: slide out + fade on ack
+   ---------------------------------------------------------------------- */
+.reminder-card {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 10px;          /* sit in the top strip of the window */
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 20px 22px 20px 24px;
+  border-radius: 36px;
+  /* Warm, slightly saturated gradient — distinct from chat bubble
+     palette (pink) and chat-panel palette (white-pink). The amber
+     tone says "alert / action" without being red-aggressive. */
+  background: linear-gradient(135deg, #ffe6a8 0%, #ffc266 55%, #ff9a52 100%);
+  background-size: 200% 200%;
+  color: #4a2a10;
+  box-shadow:
+    0 16px 44px rgba(255, 138, 82, 0.55),
+    0 4px 10px rgba(255, 138, 82, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 -1px 0 rgba(120, 60, 10, 0.08);
+  border: 2px solid rgba(255, 255, 255, 0.55);
+  pointer-events: auto;
+  z-index: 7;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.35;
+
+  /* Entrance uses `translate` (CSS individual transform) so the
+     sway animation below can drive `transform: rotate/translate`
+     independently without fighting the entry transition. */
+  opacity: 0;
+  translate: 0 -18px;
+  scale: 0.94;
+  transform-origin: 50% 50%;
+  transition: opacity 280ms ease, translate 320ms cubic-bezier(0.34, 1.56, 0.64, 1),
+              scale 320ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  /* Ambient animations:
+     - reminder-sway  : the whole card rocks left/right ±8px @ ±2.5°
+     - reminder-color : the gradient slides horizontally
+     - reminder-glow  : shadow depth pulses with the sway
+     The three loops are deliberately not synced (0.6s / 2.4s / 0.6s)
+     so the combined motion feels organic. The card sways forever;
+     it only stops when the user hovers it (see .settled below)
+     so they can click the "知道了" button without chasing it. */
+  animation:
+    reminder-sway  0.6s ease-in-out infinite,
+    reminder-color 2.4s ease-in-out infinite,
+    reminder-glow  0.6s ease-in-out infinite;
+  will-change: transform, box-shadow, background-position;
+}
+.reminder-card.visible {
+  opacity: 1;
+  translate: 0 0;
+  scale: 1;
+}
+.reminder-card.dismissing {
+  /* Override ambient animations so the exit plays cleanly. */
+  animation: none;
+  opacity: 0;
+  translate: 0 -12px;
+  scale: 0.96;
+  transition: opacity 280ms ease, translate 280ms ease, scale 280ms ease;
+}
+
+/* When the user hovers the card, JS adds `.settled` (see chat.ts).
+   This kills ALL ambient motion so the cursor can land on the
+   "知道了" button. The card stays visually present via its
+   solid gradient + shadow, just no longer moving. */
+.reminder-card.settled {
+  animation: none;
+  transform: translateX(0) rotate(0);
+}
+
+/* Smaller horizontal sway — visible but not enough to outrun the
+   cursor. ±8px translate + ±2.5° rotate @ 0.6s, infinite loop.
+   Loops back to the start position so the rocking never settles —
+   keeps going until the user hovers (see .settled below). */
+@keyframes reminder-sway {
+  0%   { transform: translateX(-8px) rotate(-2.5deg); }
+  25%  { transform: translateX( 8px) rotate( 2.5deg); }
+  50%  { transform: translateX(-8px) rotate(-2.5deg); }
+  75%  { transform: translateX( 8px) rotate( 2.5deg); }
+  100% { transform: translateX(-8px) rotate(-2.5deg); }
+}
+
+/* Color breathing — slide the gradient's background-position
+   horizontally so the visible band cycles through warm yellow →
+   hot orange → back. background-size:200% makes the slide visible
+   inside the card. 2.4s period, intentionally out of sync with
+   the 1.2s sway so the two never lock into a single beat. */
+@keyframes reminder-color {
+  0%, 100% { background-position:   0% 50%; }
+  50%      { background-position: 100% 50%; }
+}
+
+/* Glow pulse — synced with the sway, peaks the drop-shadow at the
+   sway apex so the whole card "breathes" in time. */
+@keyframes reminder-glow {
+  0%, 100% { box-shadow:
+    0 16px 44px rgba(255, 138, 82, 0.55),
+    0 4px 10px rgba(255, 138, 82, 0.4),
+    inset 0 1px 0 rgba(255,255,255,0.55),
+    inset 0 -1px 0 rgba(120,60,10,0.08); }
+  50%      { box-shadow:
+    0 22px 56px rgba(255, 100, 60, 0.85),
+    0 5px 16px rgba(255, 100, 60, 0.6),
+    inset 0 1px 0 rgba(255,255,255,0.6),
+    inset 0 -1px 0 rgba(120,60,10,0.08); }
+}
+
+/* Icon — circular badge on the left. Soft ring + emoji centered. */
+.reminder-icon {
+  flex: 0 0 auto;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  background: radial-gradient(circle at 35% 30%, #fff7d6, #ffd166 70%, #f4a83a);
+  box-shadow: 0 4px 10px rgba(120,60,10,0.35),
+              inset 0 1px 0 rgba(255,255,255,0.6);
+  line-height: 1;
+}
+
+/* Text — fills the middle, wraps gracefully. min-width:0 lets the
+   flex child actually shrink so long Chinese text breaks instead of
+   pushing the ack button off-screen. */
+.reminder-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  word-break: break-word;
+  text-shadow: 0 1px 0 rgba(255,255,255,0.4);
+  font-size: 18px;
+}
+
+/* Ack button — pill on the right. Sits inside the same card so the
+   whole thing reads as one unit (no more "split halves").
+   IMPORTANT: the card sways with `transform: translateX(...) rotate(...)`.
+   If we let that transform apply to the button, the button hit-box
+   would move every frame and the cursor can't keep up. The fix is
+   to give the button its own `transform` that counter-rotates and
+   counter-translates the card's transform — but we don't know the
+   exact keyframe value to invert. So instead, we keep the button
+   visually anchored to the card by inheriting the transform from
+   the parent (it does sway with the card, visually correct) AND
+   widen its clickable area via padding. The reduced sway (±8px /
+   ±2.5°) makes it possible to click even while moving. */
+.reminder-ack {
+  flex: 0 0 auto;
+  border: none;
+  padding: 12px 26px;
+  border-radius: 22px;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, #ff7a8a, #d94d63);
+  box-shadow: 0 4px 12px rgba(180, 50, 70, 0.5),
+              inset 0 1px 0 rgba(255,255,255,0.3);
+  cursor: pointer;
+  letter-spacing: 0.05em;
+  /* Promote to its own layer so cursor hit-testing tracks the
+     moving button frame-by-frame rather than getting averaged. */
+  transform: translateZ(0);
+  will-change: transform;
+  transition: transform 100ms ease, box-shadow 150ms ease, filter 150ms ease;
+}
+.reminder-ack:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 12px rgba(180, 50, 70, 0.55),
+              inset 0 1px 0 rgba(255,255,255,0.4);
+  filter: brightness(1.06);
+}
+.reminder-ack:active {
+  transform: translateY(0);
+  filter: brightness(0.95);
+}

@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>小柚提醒</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: linear-gradient(135deg, #fff0f3, #ffe4e9);
+    min-height: 100vh;
+    padding: 0 0 80px 0;
+    color: #2c2330;
+  }
+  .header {
+    background: linear-gradient(135deg, #ffd1dc, #ffb3c6);
+    padding: 18px 16px 14px;
+    text-align: center;
+    box-shadow: 0 4px 12px rgba(255, 138, 168, 0.3);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .header h1 { font-size: 20px; color: #6b2a3f; font-weight: 700; letter-spacing: 0.03em; }
+  .header .sub { font-size: 12px; color: #8a4a5a; margin-top: 2px; }
+
+  .container { max-width: 480px; margin: 0 auto; padding: 16px; }
+
+  /* ---- Token input ---- */
+  .token-screen {
+    position: fixed; inset: 0; z-index: 99;
+    background: linear-gradient(135deg, #fff0f3, #ffe4e9);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 24px;
+  }
+  .token-screen.hidden { display: none; }
+  .token-box {
+    background: rgba(255,255,255,0.9);
+    border-radius: 18px;
+    padding: 28px 24px;
+    width: 100%; max-width: 380px;
+    box-shadow: 0 8px 32px rgba(255,138,168,0.2);
+    text-align: center;
+  }
+  .token-box h2 { font-size: 18px; color: #6b2a3f; margin-bottom: 8px; }
+  .token-box p { font-size: 13px; color: #8a4a5a; margin-bottom: 16px; line-height: 1.4; }
+  .token-box input {
+    width: 100%; padding: 12px 14px; font-size: 14px;
+    border: 1px solid rgba(0,0,0,0.08); border-radius: 12px;
+    background: rgba(255,255,255,0.85); color: #2c2330; outline: none;
+    transition: border-color 150ms;
+  }
+  .token-box input:focus { border-color: #ffb3c6; box-shadow: 0 0 0 3px rgba(255,179,198,0.25); }
+
+  /* ---- Add form ---- */
+  .add-card {
+    background: rgba(255,255,255,0.9);
+    border-radius: 16px;
+    padding: 16px;
+    box-shadow: 0 4px 16px rgba(255,138,168,0.15);
+    margin-bottom: 16px;
+  }
+  .add-card textarea {
+    width: 100%; padding: 10px 12px; font-size: 14px; font-family: inherit;
+    border: 1px solid rgba(0,0,0,0.08); border-radius: 12px;
+    background: rgba(255,255,255,0.85); color: #2c2330; outline: none; resize: vertical;
+    min-height: 48px; transition: border-color 150ms;
+  }
+  .add-card textarea:focus { border-color: #ffb3c6; box-shadow: 0 0 0 3px rgba(255,179,198,0.25); }
+  .add-card textarea::placeholder { color: #b09ba3; }
+
+  .add-row {
+    display: flex; align-items: center; gap: 8px; margin-top: 10px;
+  }
+  .add-row input[type="datetime-local"] {
+    flex: 1; padding: 8px 10px; font-size: 13px; font-family: inherit;
+    border: 1px solid rgba(0,0,0,0.08); border-radius: 12px;
+    background: rgba(255,255,255,0.85); color: #2c2330; outline: none;
+  }
+  .add-row input[type="datetime-local"]:focus { border-color: #ffb3c6; }
+
+  .btn {
+    border: none; padding: 9px 18px; border-radius: 14px;
+    font-size: 14px; font-weight: 600; cursor: pointer;
+    transition: transform 100ms, box-shadow 150ms; white-space: nowrap;
+  }
+  .btn:active { transform: scale(0.96); }
+  .btn-primary {
+    background: linear-gradient(135deg, #ffd1dc, #ffb3c6);
+    color: #6b2a3f; box-shadow: 0 2px 8px rgba(255,138,168,0.4);
+  }
+  .btn-primary:hover { box-shadow: 0 4px 12px rgba(255,138,168,0.5); }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
+  .btn-secondary {
+    background: rgba(255,255,255,0.85); color: #6b2a3f;
+    border: 1px solid rgba(0,0,0,0.08);
+  }
+  .btn-danger {
+    background: none; color: #c0392b; font-size: 12px; padding: 4px 8px; font-weight: 400;
+  }
+  .btn-danger:hover { background: rgba(192,57,43,0.08); border-radius: 8px; }
+
+  /* ---- Reminder list ---- */
+  .reminder-list { display: flex; flex-direction: column; gap: 10px; }
+  .reminder-card {
+    background: rgba(255,255,255,0.9);
+    border-radius: 14px;
+    padding: 14px 16px;
+    box-shadow: 0 2px 10px rgba(255,138,168,0.1);
+    position: relative;
+    transition: opacity 200ms;
+  }
+  .reminder-card.removing { opacity: 0; }
+  .reminder-card .text { font-size: 14px; line-height: 1.5; color: #2c2330; word-break: break-word; }
+  .reminder-card .meta {
+    display: flex; justify-content: space-between; align-items: center; margin-top: 8px;
+  }
+  .reminder-card .time { font-size: 12px; color: #8a4a5a; }
+  .reminder-card .actions { display: flex; gap: 4px; }
+
+  .empty-state {
+    text-align: center; padding: 40px 20px; color: #8a4a5a; font-size: 14px; line-height: 1.6;
+  }
+  .empty-state .icon { font-size: 40px; display: block; margin-bottom: 12px; }
+
+  .error-toast {
+    position: fixed; bottom: 20px; left: 16px; right: 16px;
+    background: rgba(192,57,43,0.95); color: white; padding: 12px 16px;
+    border-radius: 14px; font-size: 13px; text-align: center;
+    z-index: 100; box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    transform: translateY(120px); transition: transform 250ms cubic-bezier(0.2,0.8,0.2,1);
+    pointer-events: none;
+  }
+  .error-toast.show { transform: translateY(0); }
+
+  .loading {
+    text-align: center; padding: 40px; color: #8a4a5a; font-size: 14px;
+  }
+  .btn-logout {
+    position: absolute; top: 18px; left: 14px;
+    background: none; border: none; color: #8a4a5a; font-size: 12px; cursor: pointer; padding: 4px 8px;
+    border-radius: 8px;
+  }
+  .btn-logout:hover { background: rgba(0,0,0,0.05); }
+</style>
+</head>
+<body>
+
+<!-- Token screen -->
+<div class="token-screen" id="tokenScreen">
+  <div class="token-box">
+    <h2>🔑 输入访问令牌</h2>
+    <p>请输入 remindersd 的 REMINDERS_TOKEN,<br>令牌只保存在这台手机的浏览器里。</p>
+    <input type="password" id="tokenInput" placeholder="粘贴你的 Token" autocomplete="off">
+    <div style="margin-top:14px"><button class="btn btn-primary" id="tokenSubmit" style="width:100%">确定</button></div>
+    <div id="tokenError" style="color:#c0392b;font-size:12px;margin-top:8px;display:none"></div>
+  </div>
+</div>
+
+<!-- Error toast -->
+<div class="error-toast" id="errorToast"></div>
+
+<!-- Header -->
+<div class="header">
+  <button class="btn-logout" id="logoutBtn" title="清除令牌并退出">✕ 退出</button>
+  <h1>⏰ 小柚提醒</h1>
+  <div class="sub">从手机设置,电脑端同步提醒</div>
+</div>
+
+<div class="container">
+
+  <!-- Add form -->
+  <div class="add-card" id="addCard">
+    <textarea id="reminderText" placeholder="提醒内容..." rows="1"></textarea>
+    <div class="add-row">
+      <input type="datetime-local" id="reminderTime">
+      <button class="btn btn-primary" id="addBtn">添加</button>
+    </div>
+  </div>
+
+  <!-- Reminder list -->
+  <div id="reminderList" class="reminder-list">
+    <div class="empty-state">
+      <span class="icon">📋</span>
+      暂无提醒<br>在上面输入文字和时间,添加第一条吧~
+    </div>
+  </div>
+
+</div>
+
+<script>
+const TOKEN_KEY = 'reminders_token';
+let token = localStorage.getItem(TOKEN_KEY) || '';
+const BASE = '/api/reminders';
+
+// ---- UI refs ----
+const tokenScreen = document.getElementById('tokenScreen');
+const tokenInput = document.getElementById('tokenInput');
+const tokenSubmit = document.getElementById('tokenSubmit');
+const tokenError = document.getElementById('tokenError');
+const logoutBtn = document.getElementById('logoutBtn');
+const listEl = document.getElementById('reminderList');
+const textInput = document.getElementById('reminderText');
+const timeInput = document.getElementById('reminderTime');
+const addBtn = document.getElementById('addBtn');
+const errorToast = document.getElementById('errorToast');
+let toastTimer = null;
+
+// ---- init ----
+if (token) tokenScreen.classList.add('hidden');
+setDefaultTime();
+
+// ---- auth ----
+tokenSubmit.addEventListener('click', () => {
+  const val = tokenInput.value.trim();
+  if (!val) { showTokenError('令牌不能为空'); return; }
+  token = val;
+  localStorage.setItem(TOKEN_KEY, token);
+  tokenScreen.classList.add('hidden');
+  loadReminders();
+});
+tokenInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') tokenSubmit.click(); });
+
+logoutBtn.addEventListener('click', () => {
+  localStorage.removeItem(TOKEN_KEY);
+  token = '';
+  tokenInput.value = '';
+  tokenScreen.classList.remove('hidden');
+  listEl.innerHTML = '<div class="empty-state"><span class="icon">🔑</span>已退出,重新输入令牌即可继续</div>';
+});
+
+// ---- API ----
+async function api(method, path, body) {
+  const headers = { Authorization: `Bearer ${token}` };
+  if (body) { headers['Content-Type'] = 'application/json'; }
+  const res = await fetch(BASE + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  if (res.status === 401) {
+    localStorage.removeItem(TOKEN_KEY); token = '';
+    tokenScreen.classList.remove('hidden'); tokenInput.value = '';
+    showTokenError('令牌无效,请重新输入');
+    return null;
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`HTTP ${res.status} ${text.slice(0, 60)}`);
+  }
+  if (method === 'DELETE') return;
+  return res.json();
+}
+
+async function loadReminders() {
+  listEl.innerHTML = '<div class="loading">加载中...</div>';
+  try {
+    const items = await api('GET', '?userId=local');
+    if (items === null) return; // 401 handled
+    if (!Array.isArray(items) || items.length === 0) {
+      listEl.innerHTML = '<div class="empty-state"><span class="icon">📋</span>暂无提醒<br>在上面输入文字和时间,添加第一条吧~</div>';
+      return;
+    }
+    // Sort by time
+    items.sort((a, b) => a.fireAt - b.fireAt);
+    listEl.innerHTML = items.map(r => renderCard(r)).join('');
+  } catch (err) {
+    listEl.innerHTML = `<div class="empty-state"><span class="icon">❌</span>加载失败<br>${err.message}</div>`;
+  }
+}
+
+function renderCard(r) {
+  const dt = new Date(r.fireAt);
+  const dateStr = pad2(dt.getMonth()+1) + '/' + pad2(dt.getDate()) + ' ' + pad2(dt.getHours()) + ':' + pad2(dt.getMinutes());
+  const isPast = r.fireAt < Date.now();
+  return `<div class="reminder-card" data-id="${esc(r.id)}">
+    <div class="text">${esc(r.text)}</div>
+    <div class="meta">
+      <span class="time">${isPast ? '⏰ 已过期 · ' : ''}${dateStr}</span>
+      <div class="actions">
+        <button class="btn btn-danger" onclick="deleteRem('${esc(r.id)}')">删除</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+window.deleteRem = async function(id) {
+  try {
+    await api('DELETE', `/${encodeURIComponent(id)}?userId=local`);
+  } catch (err) {
+    showError('删除失败: ' + err.message);
+  }
+  loadReminders();
+};
+
+// ---- Add ----
+addBtn.addEventListener('click', async () => {
+  const text = textInput.value.trim();
+  const timeVal = timeInput.value;
+  if (!text) { showError('请输入提醒内容'); return; }
+  if (!timeVal) { showError('请选择提醒时间'); return; }
+  const fireAt = new Date(timeVal).getTime();
+  if (isNaN(fireAt)) { showError('时间格式不正确'); return; }
+  addBtn.disabled = true;
+  try {
+    await api('POST', '', {
+      id: 'h5_' + Date.now(),
+      userId: 'local',
+      text,
+      fireAt,
+      recurring: 'none',
+      acknowledged: false,
+      createdAt: Date.now(),
+    });
+    textInput.value = '';
+    setDefaultTime();
+    loadReminders();
+  } catch (err) {
+    showError('添加失败: ' + err.message);
+  } finally {
+    addBtn.disabled = false;
+  }
+});
+
+// Enter to add
+textInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addBtn.click(); }
+});
+
+// ---- helpers ----
+function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function showTokenError(msg) {
+  tokenError.textContent = msg; tokenError.style.display = 'block';
+  setTimeout(() => { tokenError.style.display = 'none'; }, 3000);
+}
+function showError(msg) {
+  errorToast.textContent = msg; errorToast.classList.add('show');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => errorToast.classList.remove('show'), 3000);
+}
+function setDefaultTime() {
+  const now = new Date();
+  now.setMinutes(now.getMinutes() + 30);
+  now.setSeconds(0); now.setMilliseconds(0);
+  const s = now.getFullYear() + '-' + pad2(now.getMonth()+1) + '-' + pad2(now.getDate()) + 'T'
+          + pad2(now.getHours()) + ':' + pad2(now.getMinutes());
+  timeInput.value = s;
+}
+
+// ---- Load on start ----
+if (token) loadReminders();
+</script>
+</body>
+</html>
