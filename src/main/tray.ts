@@ -8,7 +8,6 @@ import {
   stopNotifyServer,
   isNotifyRunning,
   installHooks,
-  uninstallHooks,
   _getNotifyBus,
 } from './notify';
 
