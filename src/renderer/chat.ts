@@ -51,6 +51,34 @@ export function setupChat(): void {
 
   chatClose.addEventListener('click', closeChatWindow);
 
+  // ---------- interactive lock while cursor is over the bubble stack --
+  //
+  // The BrowserWindow defaults to click-through (`setIgnoreMouseEvents(true,
+  // {forward:true})`). The renderer's only "I'm over the pet" toggle is
+  // the `mouseenter`/`mouseleave` pair on `#pet-canvas` (see pet.ts).
+  // When the user moves the cursor from the pet onto a bubble, the
+  // canvas fires `mouseleave`, main flips ignore-mouse back ON, and any
+  // further click — including the × close button on a bubble — falls
+  // through to the desktop. This was the "气泡关不掉" regression.
+  //
+  // Fix: while the cursor is over the bubble stack, hold an interactive
+  // lock. The lock token-based API in main lets multiple panels hold
+  // their own locks; we use a stable token `chat-bubble-stack` so the
+  // menu (`menu-lock`) and chat input (`chat-panel-lock`) are unaffected.
+  //
+  // Note: we attach to `#bubble-stack` (the container), not each bubble.
+  // The CSS for `#bubble-stack` was flipped from `pointer-events: none`
+  // to `auto` so mouseenter/leave fire even when the cursor is over
+  // the 8px gap between bubbles. Individual `.bubble` elements already
+  // had `pointer-events: auto` for the close button to work.
+  const BUBBLE_STACK_LOCK = 'chat-bubble-stack';
+  stack.addEventListener('mouseenter', () => {
+    window.petApi.pet.lockInteractive(BUBBLE_STACK_LOCK);
+  });
+  stack.addEventListener('mouseleave', () => {
+    window.petApi.pet.unlockInteractive(BUBBLE_STACK_LOCK);
+  });
+
   // Drag the window by its header. We do this in the renderer (rather than
   // asking main for a movable BrowserWindow) to keep this feature contained.
   let dragging = false;

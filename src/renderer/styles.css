@@ -115,7 +115,14 @@ html, body {
   max-height: 70vh;
   overflow-y: auto;
   z-index: 6;
-  pointer-events: none;
+  /* pointer-events: auto so mouseenter/leave fire when the cursor is
+     over the bubble stack (or the gap between bubbles). Individual
+     `.bubble` children keep `pointer-events: auto` so the × button is
+     clickable; the chat.ts setupChat hook holds an interactive lock
+     while the cursor is over the stack — otherwise click-through
+     re-enables the moment the cursor leaves `#pet-canvas` and the ×
+     button stops responding. */
+  pointer-events: auto;
   scrollbar-width: none;
 }
 .bubble-stack::-webkit-scrollbar { display: none; }
