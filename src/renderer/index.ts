@@ -5,7 +5,8 @@ import { startPet, PetHandle } from './pet';
 import { setupMenu, MenuAction } from './menu';
 import { setupChat } from './chat';
 import { setupSettings } from './settings';
-import type { AppConfig, ChatMessage, PetPosition, PetBounds, Reminder } from '../shared/types';
+import { setupNotify } from './notify';
+import type { AppConfig, ChatMessage, PetPosition, PetBounds, Reminder, NotifyPayload } from '../shared/types';
 
 declare global {
   interface Window {
@@ -37,6 +38,15 @@ declare global {
         remove: (id: string) => Promise<void>;
         onFired: (handler: (r: Reminder) => void) => () => void;
       };
+      notify: {
+        enable: () => Promise<{ ok: boolean; running: boolean }>;
+        disable: () => Promise<{ ok: boolean }>;
+        installHooks: () => Promise<{ ok: boolean; message: string }>;
+        uninstallHooks: () => Promise<{ ok: boolean; message: string }>;
+        testNotify: (kind?: string) => Promise<{ ok: boolean; message?: string }>;
+        focusPet: () => Promise<{ ok: boolean } | null>;
+        onNotify: (handler: (p: NotifyPayload) => void) => () => void;
+      };
     };
     // Set by setupChat so the context menu can toggle the input panel.
     __openChat?: () => void;
@@ -64,6 +74,8 @@ async function main() {
   setupChat();
   // Wire up the settings drawer.
   setupSettings();
+  // Subscribe to Claude Code hook notifications (bubbles + attention mood).
+  setupNotify(pet.stateMachine);
 
   // Reminder zoom: when a reminder fires, grow the window so the
   // scaled-up pet has room to render (default 320×360 would clip a

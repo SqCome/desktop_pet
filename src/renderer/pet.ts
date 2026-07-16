@@ -15,6 +15,10 @@ export interface PetHandle {
   /** Change facial expression. No-op for image modes. */
   setExpression: (id: string) => void;
   destroy: () => void;
+  /** Animation state machine driving this pet. Exposed so other modules
+   * (e.g. notify) can trigger moods like `attention()` without reaching
+   * into the module-level singleton. */
+  stateMachine: PetStateMachine;
 }
 
 // Module-level handle so other modules (chat, tools) can reach the pet.
@@ -80,14 +84,15 @@ export async function startPet(
     try {
       const r = await fetch(p.probe, { method: 'HEAD' });
       if (r.ok) {
-        const handle = await p.loader();
-        currentHandle = handle;
-        stateMachine = new PetStateMachine(handle, cfg.animation);
+        const handle: Omit<PetHandle, 'stateMachine'> = await p.loader();
+        stateMachine = new PetStateMachine(handle as PetHandle, cfg.animation);
+        const fullHandle: PetHandle = { ...handle, stateMachine };
+        currentHandle = fullHandle;
         wireInteractionsToStateMachine(stateMachine);
         console.log(`[pet] mounted in ${p.mode} mode`);
         setupDrag(canvas);
         setupClickThrough(canvas);
-        return handle;
+        return fullHandle;
       }
       console.log(`[pet] probe miss: ${p.mode} (${p.probe}) -> ${r.status}`);
     } catch (err) {
@@ -98,14 +103,15 @@ export async function startPet(
   // No assets at all — fall back to the placeholder so the app still runs.
   console.log('[pet] no assets found, showing placeholder');
   const placeholderHandle = mountPlaceholder(canvas);
-  currentHandle = placeholderHandle;
   // State machine still useful for image modes — the GIF/sequence won't
   // react to playMotion but timer-based behavior (greet) is a no-op anyway.
-  stateMachine = new PetStateMachine(placeholderHandle, cfg.animation);
+  stateMachine = new PetStateMachine(placeholderHandle as PetHandle, cfg.animation);
+  const fullHandle: PetHandle = { ...placeholderHandle, stateMachine };
+  currentHandle = fullHandle;
   wireInteractionsToStateMachine(stateMachine);
   setupDrag(canvas);
   setupClickThrough(canvas);
-  return placeholderHandle;
+  return fullHandle;
 }
 
 // Bridge events from the renderer's pointer handlers into the state machine.
@@ -123,7 +129,7 @@ function wireInteractionsToStateMachine(sm: PetStateMachine): void {
   // menu.ts by preventing default on contextmenu.
 }
 
-function mountPlaceholder(canvas: HTMLDivElement): PetHandle {
+function mountPlaceholder(canvas: HTMLDivElement): Omit<PetHandle, 'stateMachine'> {
   const placeholder = document.createElement('div');
   placeholder.className = 'placeholder';
   canvas.appendChild(placeholder);
