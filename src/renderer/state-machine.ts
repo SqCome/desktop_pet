@@ -20,7 +20,7 @@
 import type { PetHandle } from './pet';
 import type { PetAnimationConfig } from '../shared/types';
 
-export type PetState = 'idle' | 'touch' | 'speak' | 'greet';
+export type PetState = 'idle' | 'touch' | 'speak' | 'greet' | 'attention';
 
 export class PetStateMachine {
   private state: PetState = 'idle';
@@ -69,6 +69,20 @@ export class PetStateMachine {
     this.rescheduleGreet();
   }
 
+  /**
+   * Briefly flash the "attention" mood. Used when a Claude Code hook
+   * fires — the bubble carries the message, this just signals "look at me".
+   * Returns to idle after `greetDurationMs` (we reuse the same timer;
+   * no need to add a new config knob for v1).
+   */
+  attention(): void {
+    this.cancelReturn();
+    this.cancelGreet();
+    this.enter('attention');
+    this.scheduleReturn('idle', this.cfg.greetDurationMs);
+    this.rescheduleGreet();
+  }
+
   /** Replace the running config (e.g. from a settings panel hot-reload). */
   updateConfig(next: PetAnimationConfig): void {
     this.cfg = next;
@@ -100,10 +114,11 @@ export class PetStateMachine {
 
   private playMotionForState(state: PetState): void {
     switch (state) {
-      case 'idle':  this.pet.playMotion(this.cfg.idleMotion); break;
-      case 'touch': this.pet.playMotion(this.cfg.touchMotion); break;
-      case 'speak': this.pet.playMotion(this.cfg.speakMotion); break;
-      case 'greet': this.pet.playMotion(this.cfg.greetMotion); break;
+      case 'idle':       this.pet.playMotion(this.cfg.idleMotion); break;
+      case 'touch':      this.pet.playMotion(this.cfg.touchMotion); break;
+      case 'speak':      this.pet.playMotion(this.cfg.speakMotion); break;
+      case 'greet':      this.pet.playMotion(this.cfg.greetMotion); break;
+      case 'attention':  this.pet.playMotion(this.cfg.idleMotion); break;
     }
   }
 
