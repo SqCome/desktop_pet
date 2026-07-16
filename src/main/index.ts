@@ -26,7 +26,15 @@ import {
   startRemindersScheduler,
   stopRemindersScheduler,
 } from './reminders/scheduler';
-import { IPC, ChatMessage, PetBounds, Reminder } from '../shared/types';
+import { IPC, ChatMessage, PetBounds, Reminder, NotifyPayload } from '../shared/types';
+import {
+  startNotifyServer,
+  stopNotifyServer,
+  installHooks as notifyInstallHooks,
+  uninstallHooks as notifyUninstallHooks,
+  isNotifyRunning,
+  _getNotifyBus,
+} from './notify';
 
 // Workaround: some Windows GPU drivers crash Chromium's GPU process when
 // `transparent: true` is combined with hardware-accelerated compositing
@@ -63,6 +71,16 @@ function boot() {
   createPetWindow();
   createTray(getPetWindow);
 
+  // If the user previously enabled the notify bridge, restart the server.
+  // First boot after Task 8 lands won't have serviceEnabled=true (default
+  // off), so this is a no-op until the user opts in via the tray.
+  const cfgOnBoot = loadConfig();
+  if (cfgOnBoot.claudeCodeNotify.serviceEnabled) {
+    startNotifyServer({ userDataDir: app.getPath('userData') }).catch((err) => {
+      console.warn('[boot] startNotifyServer failed:', err);
+    });
+  }
+
   registerIpc();
 
   // Polls the cross-device reminders service (configurable via the
@@ -84,6 +102,7 @@ function boot() {
 
   app.on('before-quit', () => {
     stopRemindersScheduler();
+    stopNotifyServer().catch((err) => console.warn('[boot] stopNotifyServer:', err));
     disposeTray();
   });
 }
@@ -108,6 +127,29 @@ const SESSION_IDLE_TIMEOUT_MS = 3 * 60 * 1000;
 // `interactiveLocks` is a Set so multiple panels can each hold a lock.
 const interactiveLocks = new Set<string>();
 let interactiveForced = false; // last applied state
+function synthesizeTestPayload(kind?: string): NotifyPayload {
+  const k = (kind as any) || 'idle_prompt';
+  const sessionId = 'test-' + Date.now();
+  const titles: Record<string, string> = {
+    permission_request: 'Claude Code 需要授权',
+    idle_prompt: 'Claude Code 在等你',
+    stop: 'Claude Code 任务完成',
+    subagent_stop: 'Claude Code 子任务完成',
+  };
+  const bodies: Record<string, string> = {
+    permission_request: '工具:Bash — 请回 Claude Code 批准',
+    idle_prompt: '它已经停下等你输入啦',
+    stop: '主任务跑完了,等你下一句',
+    subagent_stop: '子 agent 完成,主流程继续中',
+  };
+  return {
+    sessionId,
+    kind: k,
+    title: titles[k] || titles.idle_prompt,
+    body: bodies[k] || bodies.idle_prompt,
+    ts: Date.now(),
+  };
+}
 function refreshInteractive(): void {
   const win = getPetWindow();
   if (!win) return;
@@ -308,4 +350,53 @@ function registerIpc() {
   // window back to screen center).
   ipcMain.handle(IPC.PET_SNAPSHOT_BOUNDS, () => snapshotPetBounds());
   ipcMain.handle(IPC.PET_RESTORE_BOUNDS, (_e, bounds: PetBounds) => restorePetBounds(bounds));
+
+  // Claude Code hook bridge — opt-in via tray. The renderer's preload
+  // exposes these on petApi.notify.*.
+  ipcMain.handle(IPC.NOTIFY_ENABLE, async () => {
+    await startNotifyServer({ userDataDir: app.getPath('userData') });
+    const cur = loadConfig().claudeCodeNotify;
+    updateConfig({ claudeCodeNotify: { serviceEnabled: true, hooksInstalled: cur.hooksInstalled } });
+    return { ok: true, running: isNotifyRunning() };
+  });
+
+  ipcMain.handle(IPC.NOTIFY_DISABLE, async () => {
+    await stopNotifyServer();
+    const cur = loadConfig().claudeCodeNotify;
+    updateConfig({ claudeCodeNotify: { serviceEnabled: false, hooksInstalled: cur.hooksInstalled } });
+    return { ok: true };
+  });
+
+  ipcMain.handle(IPC.NOTIFY_INSTALL_HOOKS, () => {
+    const r = notifyInstallHooks({ userDataDir: app.getPath('userData') });
+    if (r.ok) {
+      const cur = loadConfig().claudeCodeNotify;
+      updateConfig({ claudeCodeNotify: { serviceEnabled: cur.serviceEnabled, hooksInstalled: true } });
+    }
+    return r;
+  });
+
+  ipcMain.handle(IPC.NOTIFY_UNINSTALL_HOOKS, () => {
+    const r = notifyUninstallHooks();
+    if (r.ok) {
+      const cur = loadConfig().claudeCodeNotify;
+      updateConfig({ claudeCodeNotify: { serviceEnabled: cur.serviceEnabled, hooksInstalled: false } });
+    }
+    return r;
+  });
+
+  ipcMain.handle(IPC.NOTIFY_TEST, (_e, kind?: string) => {
+    const bus = _getNotifyBus();
+    if (!bus) return { ok: false, message: '服务未启用' };
+    bus.dispatch(synthesizeTestPayload(kind));
+    return { ok: true };
+  });
+
+  ipcMain.handle(IPC.NOTIFY_FOCUS_PET, () => {
+    const w = getPetWindow();
+    if (!w) return null;
+    if (!w.isVisible()) w.show();
+    w.focus();
+    return { ok: true };
+  });
 }
