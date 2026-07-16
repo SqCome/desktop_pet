@@ -56,6 +56,21 @@ const migrations: Record<number, Migration> = {
     cfg.configVersion = 3;
     return cfg;
   },
+  // v3 -> v4: add claudeCodeNotify { serviceEnabled, hooksInstalled }.
+  // Existing configs get both fields off (the user hasn't opted in yet);
+  // the renderer/tray will toggle them via IPC. The shallow merge in
+  // loadConfig would default the field at read time, but without writing
+  // it here the on-disk config.json would never gain the field — so a
+  // future user-initiated config:set wouldn't have it to update.
+  3: (cfg) => {
+    cfg.claudeCodeNotify = cfg.claudeCodeNotify && typeof cfg.claudeCodeNotify === 'object'
+      ? cfg.claudeCodeNotify
+      : {};
+    cfg.claudeCodeNotify.serviceEnabled = cfg.claudeCodeNotify.serviceEnabled === true;
+    cfg.claudeCodeNotify.hooksInstalled = cfg.claudeCodeNotify.hooksInstalled === true;
+    cfg.configVersion = 4;
+    return cfg;
+  },
 };
 
 function migrate(parsed: any, fromVersion: number): any {
@@ -92,6 +107,7 @@ export function loadConfig(): AppConfig {
         ...migrated,
         configVersion: CURRENT_CONFIG_VERSION,
         llm: { ...DEFAULT_CONFIG.llm, ...migrated.llm },
+        claudeCodeNotify: { ...DEFAULT_CONFIG.claudeCodeNotify, ...migrated.claudeCodeNotify },
       };
       cache = merged;
       return merged;
