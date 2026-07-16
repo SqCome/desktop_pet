@@ -13,8 +13,23 @@
  *      it, so reasoning leaked into the UI).
  *  v3: added remindersUrl + remindersToken for the cross-device reminders
  *      service (Go remindersd backend).
+ *  v4: added claudeCodeNotify { serviceEnabled, hooksInstalled } for the
+ *      Claude Code hook bridge (HTTP server + ~/.claude/settings.json hooks).
  */
-export const CURRENT_CONFIG_VERSION = 3;
+export const CURRENT_CONFIG_VERSION = 4;
+
+/**
+ * Two independent switches for the Claude Code hook bridge:
+ *  - serviceEnabled: turn on the local HTTP server that receives hooks.
+ *  - hooksInstalled: whether ~/.claude/settings.json currently contains
+ *    our desktop-pet-notify hooks.
+ * Splitting them lets users run one without the other (e.g. disable
+ * notifications temporarily without removing hooks).
+ */
+export interface ClaudeCodeNotifyConfig {
+  serviceEnabled: boolean;
+  hooksInstalled: boolean;
+}
 
 export interface PetPosition {
   x: number;
@@ -46,6 +61,8 @@ export interface AppConfig {
   remindersUrl: string;
   /** Bearer token for the reminders service. */
   remindersToken: string;
+  /** Claude Code hook bridge configuration. v4+ only. */
+  claudeCodeNotify: ClaudeCodeNotifyConfig;
 }
 
 /**
@@ -163,6 +180,10 @@ export const DEFAULT_CONFIG: AppConfig = {
   },
   remindersUrl: '',
   remindersToken: '',
+  claudeCodeNotify: {
+    serviceEnabled: false,
+    hooksInstalled: false,
+  },
 };
 
 /** Channels used across IPC. Keep them in one place so both ends agree. */
@@ -211,6 +232,21 @@ export const IPC = {
   /** Pushed from main → renderer when a reminder's fireAt has passed.
    * Renderer shows a bubble. */
   REMINDER_FIRED: 'reminder:fired',
+  // Claude Code hook bridge: HTTP server in main, opt-in via tray.
+  /** Start the local HTTP server that receives hook POSTs. */
+  NOTIFY_ENABLE: 'notify:enable',
+  /** Stop the HTTP server and delete the port file. */
+  NOTIFY_DISABLE: 'notify:disable',
+  /** Write ~/.claude/settings.json so Claude Code invokes our bridge. */
+  NOTIFY_INSTALL_HOOKS: 'notify:install-hooks',
+  /** Remove our hooks from ~/.claude/settings.json (preserves other hooks). */
+  NOTIFY_UNINSTALL_HOOKS: 'notify:uninstall-hooks',
+  /** Fire a synthetic notification for self-test. */
+  NOTIFY_TEST: 'notify:test',
+  /** Main → renderer push: show a notification bubble + attention mood. */
+  NOTIFY_SHOW: 'notify:show',
+  /** Renderer asks main to bring the pet window to the front. */
+  NOTIFY_FOCUS_PET: 'notify:focus-pet',
 } as const;
 
 export type ChatMessage = {
@@ -236,4 +272,23 @@ export type Reminder = {
   acknowledged: boolean;
   /** ms epoch. */
   createdAt: number;
+};
+
+/**
+ * Normalized hook payload the main process forwards to the renderer.
+ * `kind` is one of four normalized event types; everything else from
+ * Claude Code is dropped in normalizeHook().
+ */
+export type NotifyPayload = {
+  /** Used for dedup. Provided by Claude Code, fallback = random. */
+  sessionId: string;
+  kind: 'permission_request' | 'idle_prompt' | 'stop' | 'subagent_stop';
+  /** Rendered as bubble title (main pre-formats the Chinese text). */
+  title: string;
+  /** Bubble body, <= 80 chars. */
+  body: string;
+  /** Optional context for the click handler (currently unused by focusPet). */
+  focusHint?: { kind: 'ide' | 'terminal'; value: string };
+  /** ms epoch. */
+  ts: number;
 };
