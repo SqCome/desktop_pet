@@ -799,7 +799,12 @@ html, body {
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(255, 158, 192, 0.4);
   max-width: 240px;
-  animation: bubble-pop-in 0.2s ease-out;
+  /* Use transition (not animation) so it composes with `.bubble.visible`'s
+     transition. animation's fill-mode=none would otherwise revert the
+     element to base styles when the keyframe ends, briefly flashing
+     opacity:0 even though `.visible` says 1. Transition avoids the
+     flash by not having a "post-animation" state. */
+  transition: opacity 200ms ease, transform 200ms ease;
 }
 
 .bubble-notify .bubble-title {

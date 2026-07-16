@@ -23,7 +23,19 @@ function showBubble(payload: NotifyPayload, onClick: () => void): void {
   el.addEventListener('click', onClick);
   stack.appendChild(el);
 
-  // Trigger fade-in (CSS .bubble has transform/animation on append).
+  // Match chat.ts createBubble pattern: add `.visible` on the next frame so
+  // CSS transitions (opacity, transform) animate in. Without this the
+  // element stays at the base `.bubble` styles (opacity: 0) even though
+  // our `.bubble-notify` keyframe runs for 0.2s on append — once the
+  // keyframe ends, the base styles take over and the bubble vanishes.
+  requestAnimationFrame(() => {
+    el.classList.add('visible');
+    // The stack is a normal `flex-direction: column` — newest bubble is
+    // at the bottom of the column. Pin scroll to the bottom so the
+    // latest message is always in view.
+    stack.scrollTop = stack.scrollHeight;
+  });
+
   window.setTimeout(() => {
     el.classList.add('bubble-fade-out');
     window.setTimeout(() => el.remove(), 400);
