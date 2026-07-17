@@ -22,8 +22,23 @@ export class NotifyBus {
   /**
    * Send `p` to every live BrowserWindow, unless the same sessionId+kind
    * fired within DEDUP_WINDOW_MS.
+   *
+   * Todo updates bypass dedup entirely: TodoWrite fires on every status
+   * change (typically every few seconds during a multi-step task), and the
+   * panel must reflect the latest state — collapsing two TodoWrite calls
+   * would freeze the panel on a stale checklist. The bus-side dedup is
+   * only useful for transient bubbles (Stop/permission_request/...)
+   * where Claude Code's retry-on-error would otherwise produce 2-3
+   * identical bubbles for one logical event.
    */
   dispatch(p: NotifyPayload): void {
+    if (p.kind === 'todo_update') {
+      for (const w of this.windows()) {
+        if (w.isDestroyed()) continue;
+        w.webContents.send(IPC.NOTIFY_SHOW, p);
+      }
+      return;
+    }
     const key: Key = `${p.sessionId}:${p.kind}`;
     const prev = this.recent.get(key);
     const now = Date.now();

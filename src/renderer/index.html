@@ -21,6 +21,12 @@
       <!-- Speech bubbles for the latest thinking + reply (transient). -->
       <div id="bubble-stack" class="bubble-stack"></div>
 
+      <!-- TodoWrite checklist panel — one section per Claude Code agent,
+           updated in place. Default visible. Hidden via the context menu
+           toggle. Sits in the top-left so it doesn't fight the chat /
+           settings windows which anchor top-right. -->
+      <div id="todo-panel" class="todo-panel"></div>
+
       <!-- Chat input row that lives just below the pet. Always visible
            while the chat panel is open. -->
       <div id="chat-panel" class="chat-panel hidden">
@@ -88,6 +94,22 @@
             <input id="settings-remindersToken" type="password" autocomplete="off" spellcheck="false"
                    placeholder="Bearer token" />
           </label>
+          <div class="settings-section-title">窗口尺寸</div>
+          <label class="settings-field">
+            <span>宽度 (px)</span>
+            <input id="settings-winWidth" type="number" min="300" max="800" step="10"
+                   autocomplete="off" />
+          </label>
+          <label class="settings-field">
+            <span>高度 (px)</span>
+            <input id="settings-winHeight" type="number" min="300" max="800" step="10"
+                   autocomplete="off" />
+          </label>
+          <div class="settings-section-title">系统</div>
+          <label class="settings-field settings-checkbox-row">
+            <input id="settings-autoStart" type="checkbox" />
+            <span>开机自启动</span>
+          </label>
           <div class="settings-actions">
             <button id="settings-save" class="settings-save">保存</button>
             <span id="settings-status" class="settings-status"></span>
@@ -99,6 +121,7 @@
       <div id="menu" class="menu hidden">
         <button data-action="chat">💬 聊天</button>
         <button data-action="history">📜 历史</button>
+        <button data-action="todos">📋 任务清单</button>
         <button data-action="reminder">⏰ 提醒</button>
         <button data-action="weather">🌤 天气</button>
         <button data-action="notes">📝 笔记</button>

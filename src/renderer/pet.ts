@@ -171,6 +171,11 @@ function setupDrag(canvas: HTMLDivElement) {
       canvas.classList.remove('dragging');
     }
   });
+
+  // Consume the pet:drag event — actually move the BrowserWindow.
+  window.addEventListener('pet:drag', ((e: CustomEvent<{ dx: number; dy: number }>) => {
+    window.petApi.pet.moveBy(e.detail.dx, e.detail.dy);
+  }) as EventListener);
 }
 
 function setupClickThrough(canvas: HTMLDivElement) {

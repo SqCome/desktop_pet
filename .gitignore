@@ -14,3 +14,12 @@ release/
 *.db-shm
 server/bin/
 server/coverage.out
+
+# Claude Code local superpowers (skill state, plans) — local-only, never
+# shared. The repo only keeps docs/superpowers/plans/* (already tracked).
+.superpowers/
+
+# Debug / diagnostic helpers — scripts the developer wrote to investigate
+# a single machine's bridge install and never meant to keep around.
+scripts/fix-hooks.py
+scripts/patch-bridge.py

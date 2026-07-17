@@ -5,7 +5,7 @@ import { startPet, PetHandle } from './pet';
 import { setupMenu, MenuAction } from './menu';
 import { setupChat } from './chat';
 import { setupSettings } from './settings';
-import { setupNotify } from './notify';
+import { setupNotify, toggleTodoPanel } from './notify';
 import type { AppConfig, ChatMessage, PetPosition, PetBounds, Reminder, NotifyPayload } from '../shared/types';
 
 declare global {
@@ -14,6 +14,8 @@ declare global {
       config: {
         get: () => Promise<AppConfig>;
         set: (patch: Partial<AppConfig>) => Promise<AppConfig>;
+        setWindowSize: (width: number, height: number) => Promise<{ width: number; height: number } | null>;
+        quit: () => Promise<void>;
       };
       chat: {
         send: (text: string) => Promise<void>;
@@ -152,6 +154,11 @@ async function main() {
         // Toggle the input panel; chat.ts owns the bubble display.
         window.__openChat?.();
         break;
+      case 'todos':
+        // Show/hide the TodoWrite checklist panel. No bubble — the panel
+        // itself is the affordance, and it's already pinned to top-left.
+        toggleTodoPanel();
+        break;
       case 'settings':
         window.__openSettings?.();
         break;
@@ -171,7 +178,7 @@ async function main() {
         }
         break;
       case 'quit':
-        window.close();
+        window.petApi.config.quit();
         break;
       default:
         // For unimplemented tools, surface a one-off bubble as feedback.

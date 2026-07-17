@@ -8,7 +8,7 @@
 // hides it; the tray icon keeps the app alive. Quitting happens via the tray
 // "退出" entry, which calls `app.exit(0)` explicitly.
 import { app, ipcMain, BrowserWindow } from 'electron';
-import { createPetWindow, getPetWindow, centerPetWindow, resizePetWindow, snapshotPetBounds, restorePetBounds } from './window';
+import { createPetWindow, getPetWindow, centerPetWindow, resizePetWindow, expandPetWindow, snapshotPetBounds, restorePetBounds } from './window';
 import { createTray, disposeTray } from './tray';
 import { loadConfig, updateConfig } from './storage';
 import { streamChat, _stripThink } from './llm/client';
@@ -36,12 +36,22 @@ import {
   _getNotifyBus,
 } from './notify';
 
-// Workaround: some Windows GPU drivers crash Chromium's GPU process when
-// `transparent: true` is combined with hardware-accelerated compositing
-// (manifests as "GPU process exited unexpectedly: exit_code=143"). Disabling
-// GPU acceleration forces software rendering, which trades a bit of battery
-// for a window that actually paints. To re-enable, set PET_GPU=1.
-if (process.env.PET_GPU !== '1') {
+// GPU acceleration is on by default. Chromium probes the available GPU
+// at startup; if the driver is healthy it uses hardware compositing (low
+// CPU). If the GPU process crashes on launch, Chromium itself falls back
+// to SwiftShader software rendering on the next start — we don't need
+// to force the fallback ourselves.
+//
+// The old default of `app.disableHardwareAcceleration()` was added as a
+// workaround for a now-rare class of Windows drivers that crashed when
+// `transparent: true` was combined with hardware compositing. It kept
+// the pet visible on those machines at the cost of pinning one CPU core
+// for the SwiftShader backend. Leaving it as the default meant every user
+// paid that cost even on perfectly healthy GPUs.
+//
+// To force software rendering (e.g. if your GPU driver is unstable), set
+// PET_DISABLE_GPU=1 in the environment before launching.
+if (process.env.PET_DISABLE_GPU === '1') {
   app.disableHardwareAcceleration();
 }
 
@@ -52,9 +62,17 @@ if (!gotLock) {
 } else {
   app.on('second-instance', () => {
     const win = getPetWindow();
-    if (win) {
+    if (win && !win.isDestroyed()) {
       if (!win.isVisible()) win.show();
       win.focus();
+    } else {
+      // Window was destroyed (Alt+F4 or programmatic close) while the app
+      // kept running in the tray. Dispose the stale tray icon first to
+      // avoid accumulating multiple system-tray entries, then recreate.
+      disposeTray();
+      const cfg = loadConfig();
+      createPetWindow(cfg);
+      createTray(getPetWindow);
     }
   });
 
@@ -68,13 +86,10 @@ function boot() {
     app.dock?.hide();
   }
 
-  createPetWindow();
-  createTray(getPetWindow);
-
-  // If the user previously enabled the notify bridge, restart the server.
-  // First boot after Task 8 lands won't have serviceEnabled=true (default
-  // off), so this is a no-op until the user opts in via the tray.
   const cfgOnBoot = loadConfig();
+  applyAutoStart(cfgOnBoot.autoStart);
+  createPetWindow(cfgOnBoot);
+  createTray(getPetWindow);
   if (cfgOnBoot.claudeCodeNotify.serviceEnabled) {
     startNotifyServer({ userDataDir: app.getPath('userData') }).catch((err) => {
       console.warn('[boot] startNotifyServer failed:', err);
@@ -127,6 +142,13 @@ const SESSION_IDLE_TIMEOUT_MS = 3 * 60 * 1000;
 // `interactiveLocks` is a Set so multiple panels can each hold a lock.
 const interactiveLocks = new Set<string>();
 let interactiveForced = false; // last applied state
+/** Tracks the renderer's last-known cursor-vs-pet state, even while
+ * locks are held (PET_INTERACTION messages are ignored during locks).
+ * On last-lock-release we restore to this state instead of blindly
+ * setting click-through — otherwise if the cursor is still over the
+ * pet canvas when the lock drops, mouseenter won't re-fire and the
+ * window stays dead. */
+let lastRenderInteractive = false;
 function synthesizeTestPayload(kind?: string): NotifyPayload {
   const k = (kind as any) || 'idle_prompt';
   const sessionId = 'test-' + Date.now();
@@ -162,17 +184,76 @@ function refreshInteractive(): void {
     win.setIgnoreMouseEvents(false, { forward: false });
     interactiveForced = true;
   } else if (!wanted && interactiveForced) {
-    // Restore click-through; renderer's next PET_INTERACTION message will
-    // re-enable it if the cursor is over the pet.
-    win.setIgnoreMouseEvents(true, { forward: true });
+    // Restore based on the renderer's last-known cursor state, not a
+    // blind click-through. The renderer's PET_INTERACTION messages were
+    // suppressed during the lock so `lastRenderInteractive` holds the
+    // correct value — if the cursor never left the pet canvas, we must
+    // stay interactive.
+    win.setIgnoreMouseEvents(!lastRenderInteractive, { forward: true });
     interactiveForced = false;
+  }
+}
+
+/** Apply the auto-start login-item setting via Electron's OS-level API.
+ * Safe to call on every boot and on every config save — it's a no-op if
+ * the value hasn't changed. */
+function applyAutoStart(enabled: boolean): void {
+  try {
+    app.setLoginItemSettings({ openAtLogin: enabled });
+  } catch (err) {
+    console.warn('[index] setLoginItemSettings failed:', err);
   }
 }
 
 function registerIpc() {
   ipcMain.handle(IPC.CONFIG_GET, () => loadConfig());
+  ipcMain.handle(IPC.CONFIG_SET_WINDOW_SIZE, (_e, size: { width: number; height: number }) => {
+    const win = getPetWindow();
+    if (!win) return null;
+    const [oldW, oldH] = win.getSize();
+    const [x, y] = win.getPosition();
+    // Clamp so window stays within usable bounds.
+    const clampedW = Math.max(300, Math.min(800, size.width));
+    const clampedH = Math.max(300, Math.min(800, size.height));
+    // Keep the bottom edge (where the pet sits) at the same screen
+    // position — the pet canvas uses `align-items: flex-end`, so the
+    // pet is anchored to the bottom of the window. Growing or shrinking
+    // should keep the pet visually still on screen.
+    win.setBounds({
+      x: x + Math.round((oldW - clampedW) / 2), // keep horizontal center
+      y: y + oldH - clampedH,                   // keep bottom edge
+      width: clampedW,
+      height: clampedH,
+    });
+    return { width: oldW, height: oldH };
+  });
+  ipcMain.handle(IPC.APP_QUIT, () => {
+    app.exit(0);
+  });
   ipcMain.handle(IPC.CONFIG_SET, (_e, patch) => {
     const next = updateConfig(patch);
+    // If the window dimensions changed, resize immediately. Skip if the
+    // window is already at the target size — otherwise saving settings
+    // with unchanged values force-resizes and shifts the window.
+    if (patch.windowWidth !== undefined || patch.windowHeight !== undefined) {
+      const w = next.windowWidth, h = next.windowHeight;
+      const win = getPetWindow();
+      if (win) {
+        const [curW, curH] = win.getSize();
+        if (curW !== w || curH !== h) {
+          if (process.env.PET_DEBUG === '1') {
+            console.log(`[config] resize: ${curW}x${curH} -> ${w}x${h}`);
+          }
+          resizePetWindow(w, h);
+        } else if (process.env.PET_DEBUG === '1') {
+          console.log(`[config] skip resize: window already ${curW}x${curH}`);
+        }
+      }
+    }
+    // If autoStart changed, apply via the OS login item registry.
+    if (patch.autoStart !== undefined) {
+      applyAutoStart(patch.autoStart);
+    }
     // If the reminders config changed, restart the scheduler so the
     // new URL / token takes effect immediately without a restart.
     if (patch.remindersUrl !== undefined || patch.remindersToken !== undefined) {
@@ -318,6 +399,9 @@ function registerIpc() {
   // "pet is being dragged" signal — moving the window requires mouse events.
   // Suppressed while an interactive lock is held (see refreshInteractive).
   ipcMain.on(IPC.PET_INTERACTION, (_e, interactive: boolean) => {
+    // Always track the renderer's cursor state so refreshInteractive can
+    // restore it correctly when the last lock drops.
+    lastRenderInteractive = interactive;
     if (interactiveLocks.size > 0) return; // lock wins
     const win = getPetWindow();
     if (!win) return;
@@ -345,11 +429,31 @@ function registerIpc() {
     resizePetWindow(size.width, size.height),
   );
 
+  // Grow the window while keeping the pet visually anchored. Used by
+  // the todo-panel drag — when the panel extends beyond the viewport,
+  // we expand the window so nothing clips, and shift it so the pet
+  // doesn't appear to move.
+  ipcMain.handle(IPC.PET_EXPAND, (_e, { right, bottom }: { right: number; bottom: number }) =>
+    expandPetWindow(right, bottom),
+  );
+
   // Snapshot the current window geometry so a reminder dismiss can
   // restore the user's exact drag-to position (without forcing the
   // window back to screen center).
   ipcMain.handle(IPC.PET_SNAPSHOT_BOUNDS, () => snapshotPetBounds());
   ipcMain.handle(IPC.PET_RESTORE_BOUNDS, (_e, bounds: PetBounds) => restorePetBounds(bounds));
+
+  // Pet window drag: renderer sends delta on every mousemove. Main reads
+  // the current position, applies the delta, and moves the window.
+  // No screen-edge clamping — the user may want to tuck the pet
+  // partially off-screen. The OS prevents full escape.
+  // Using `on` (fire-and-forget) rather than `handle` — no reply needed.
+  ipcMain.on(IPC.PET_DRAG, (_e, { dx, dy }: { dx: number; dy: number }) => {
+    const win = getPetWindow();
+    if (!win || win.isDestroyed()) return;
+    const [x, y] = win.getPosition();
+    win.setPosition(x + dx, y + dy);
+  });
 
   // Claude Code hook bridge — opt-in via tray. The renderer's preload
   // exposes these on petApi.notify.*.

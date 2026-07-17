@@ -24,6 +24,9 @@ export function setupSettings(): void {
   const modelEl = document.getElementById('settings-model') as HTMLInputElement;
   const remindersUrlEl = document.getElementById('settings-remindersUrl') as HTMLInputElement;
   const remindersTokenEl = document.getElementById('settings-remindersToken') as HTMLInputElement;
+  const winWidthEl = document.getElementById('settings-winWidth') as HTMLInputElement;
+  const winHeightEl = document.getElementById('settings-winHeight') as HTMLInputElement;
+  const autoStartEl = document.getElementById('settings-autoStart') as HTMLInputElement;
 
   let isOpen = false;
   let statusTimer: number | null = null;
@@ -55,6 +58,9 @@ export function setupSettings(): void {
       modelEl.value = llm.model;
       remindersUrlEl.value = cfg.remindersUrl || '';
       remindersTokenEl.value = cfg.remindersToken || '';
+      winWidthEl.value = String(cfg.windowWidth);
+      winHeightEl.value = String(cfg.windowHeight);
+      autoStartEl.checked = cfg.autoStart;
     } catch (err) {
       console.error('[settings] failed to load config:', err);
       showStatus('加载配置失败', true);
@@ -110,8 +116,18 @@ export function setupSettings(): void {
     }
 
     try {
+      const w = parseInt(winWidthEl.value, 10);
+      const h = parseInt(winHeightEl.value, 10);
+      if (isNaN(w) || isNaN(h) || w < 300 || h < 300 || w > 800 || h > 800) {
+        showStatus('最小 300×300,最大 800×800', true);
+        saveBtn.disabled = false;
+        return;
+      }
       await window.petApi.config.set({
         llm,
+        windowWidth: w,
+        windowHeight: h,
+        autoStart: autoStartEl.checked,
         remindersUrl: remindersUrlEl.value.trim(),
         remindersToken: remindersTokenEl.value.trim(),
       });

@@ -2,10 +2,14 @@
 # Bridge script: read port from userData, POST hook payload to localhost.
 # Always exit 0 — Claude Code must not see failures from our notifier.
 set -u
+# userData directory name = lowercase 'desktop-pet' on every platform —
+# Electron's `app.getPath('userData')` uses `app.name`, which comes from
+# package.json's `name` field (lowercase). The `productName` field
+# ('DesktopPet') is only used by electron-builder for install paths.
 if [ "$(uname -s)" = "Darwin" ]; then
-  PORT_FILE="${HOME}/Library/Application Support/DesktopPet/notify.port"
+  PORT_FILE="${HOME}/Library/Application Support/desktop-pet/notify.port"
 else
-  PORT_FILE="${HOME}/.config/DesktopPet/notify.port"
+  PORT_FILE="${HOME}/.config/desktop-pet/notify.port"
 fi
 [ -f "$PORT_FILE" ] || exit 0
 PORT=$(cat "$PORT_FILE")

@@ -1,0 +1,17 @@
+# Force CRLF line endings on .cmd/.bat scripts — Windows cmd.exe refuses to
+# parse .cmd files with LF-only line endings (it concatenates `@echo off` and
+# `setlocal` into a single unrecognizable command and silently aborts before
+# any user-defined command runs). Keeping these in CRLF at checkout time
+# means the installed bridge script is correct even if a developer edits it
+# on a Unix machine or commits it via a tool that doesn't preserve endings.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Everything else keeps LF — the renderer bundle, tsconfig, etc. don't need
+# CRLF, and most editors handle LF cleanly.
+*.ts text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.html text eol=lf
+*.css text eol=lf

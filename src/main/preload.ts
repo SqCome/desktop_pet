@@ -7,6 +7,12 @@ const api = {
   config: {
     get: (): Promise<AppConfig> => ipcRenderer.invoke(IPC.CONFIG_GET),
     set: (patch: Partial<AppConfig>): Promise<AppConfig> => ipcRenderer.invoke(IPC.CONFIG_SET, patch),
+    /** Resize the window and return the previous size. Used by settings
+     * panel to grow temporarily so the form fits, then restore on close. */
+    setWindowSize: (width: number, height: number): Promise<{ width: number; height: number } | null> =>
+      ipcRenderer.invoke(IPC.CONFIG_SET_WINDOW_SIZE, { width, height }),
+    /** Fully exit the app (tray + all). Maps to app.exit(0). */
+    quit: (): Promise<void> => ipcRenderer.invoke(IPC.APP_QUIT),
   },
   chat: {
     send: (text: string): Promise<void> => ipcRenderer.invoke(IPC.CHAT_SEND, text),
@@ -71,6 +77,17 @@ const api = {
     snapshotBounds: (): Promise<PetBounds | null> => ipcRenderer.invoke(IPC.PET_SNAPSHOT_BOUNDS),
     restoreBounds: (bounds: PetBounds): Promise<PetBounds | null> =>
       ipcRenderer.invoke(IPC.PET_RESTORE_BOUNDS, bounds),
+    /** Move the window by a delta. Fired on every mousemove during a
+     * pet-canvas drag. Main accumulates the delta and calls setPosition(). */
+    moveBy: (dx: number, dy: number): void => {
+      ipcRenderer.send(IPC.PET_DRAG, { dx, dy });
+    },
+    /** Grow the window right/down while keeping the pet at the same
+     * screen position. Used by the todo-panel drag — when the panel
+     * extends beyond the current viewport, we expand the window and
+     * shift it so the pet doesn't visually move. */
+    expand: (right: number, bottom: number): Promise<{ width: number; height: number } | null> =>
+      ipcRenderer.invoke(IPC.PET_EXPAND, { right, bottom }),
   },
   notify: {
     /** Start the local HTTP server. Idempotent. */

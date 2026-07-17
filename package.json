@@ -10,7 +10,9 @@
     "build:server": "cd server && go build -o ../dist/server/remindersd ./cmd/remindersd 2>nul || echo [remindersd] go not found, skipping",
     "build": "npm run build:main && npm run build:renderer && npm run build:server",
     "start": "npm run build && electron .",
-    "pack": "set CSC_LINK=&& set CSC_KEY_PASSWORD=&& set ELECTRON_BUILDER_ALLOW_UNRESOLVED_DEPENDENCIES=true&& set ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/&& npm run build&& electron-builder",
+    "pack": "electron-builder",
+    "pack:win": "electron-builder --win",
+    "pack:mac": "electron-builder --mac",
     "clean": "rimraf dist"
   },
   "keywords": [
@@ -50,16 +52,26 @@
     ],
     "mac": {
       "target": [
-        "dmg"
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
       ],
       "category": "public.app-category.entertainment",
-      "artifactName": "${productName}-${version}-${arch}.${ext}"
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "identity": null
     },
     "win": {
       "target": [
         "nsis"
       ],
-      "artifactName": "${productName}-Setup-${version}.${ext}"
+      "artifactName": "${productName}-Setup-${version}.${ext}",
+      "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": false,

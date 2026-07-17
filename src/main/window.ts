@@ -11,19 +11,42 @@ import { BrowserWindow, screen, app } from 'electron';
 import * as path from 'node:path';
 import type { PetPosition, PetBounds } from '../shared/types';
 
-const PET_WIDTH = 320;
-const PET_HEIGHT = 360;
+const PET_WIDTH = 500;
+const PET_HEIGHT = 480;
+
+/** Absolute minimum window size — the todo panel, notifications, and
+ * settings form all need at least this much room to display without
+ * clipping. The settings save dialog enforces 300×300 on write as well;
+ * this clamp is a belt-and-suspenders guard for config files edited by
+ * hand or migrated from an older version. */
+const MIN_WIDTH = 300;
+const MIN_HEIGHT = 300;
+/** Maximum practical size — values above this push the todo panel
+ * (top:12px) and other UI elements off the visible screen area. */
+const MAX_WIDTH = 800;
+const MAX_HEIGHT = 800;
+
+/** Clamp dimensions within [MIN, MAX] range. Applied in both
+ * createPetWindow and resizePetWindow so the window never exceeds
+ * usable bounds even if config.json has extreme values. */
+function clampDim(w: number, h: number): [number, number] {
+  return [
+    Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, w)),
+    Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, h)),
+  ];
+}
 
 let mainWindow: BrowserWindow | null = null;
 
-export function createPetWindow(initial?: PetPosition): BrowserWindow {
+export function createPetWindow(cfg?: { windowWidth?: number; windowHeight?: number }, initial?: PetPosition): BrowserWindow {
   const display = screen.getPrimaryDisplay();
+  const [width, height] = clampDim(cfg?.windowWidth ?? PET_WIDTH, cfg?.windowHeight ?? PET_HEIGHT);
   // Default to bottom-right corner of the primary display — the classic
   // desktop-pet anchor. Override via `initial` (used for restoring saved
   // position in a future update).
   const defaults = {
-    width: PET_WIDTH,
-    height: PET_HEIGHT,
+    width,
+    height,
     x: initial?.x ?? display.workArea.width - PET_WIDTH - 40,
     y: initial?.y ?? display.workArea.height - PET_HEIGHT - 40,
   };
@@ -55,6 +78,11 @@ export function createPetWindow(initial?: PetPosition): BrowserWindow {
 
   mainWindow.webContents.on('did-fail-load', (_e, code, desc) => {
     console.error(`[window] renderer failed to load: ${code} ${desc}`);
+  });
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (process.env.PET_DEBUG === '1') {
+      console.log('[window] renderer did-finish-load');
+    }
   });
   mainWindow.webContents.on('render-process-gone', (_e, details) => {
     console.error('[window] renderer process gone:', details.reason);
@@ -132,8 +160,42 @@ export function centerPetWindow(): PetPosition | null {
  */
 export function resizePetWindow(width: number, height: number): { width: number; height: number } | null {
   if (!mainWindow) return null;
-  mainWindow.setSize(width, height);
-  return { width, height };
+  const [oldW, oldH] = mainWindow.getSize();
+  const [x, y] = mainWindow.getPosition();
+  // Clamp to minimum size so the pet window never becomes unusable.
+  const [clampedW, clampedH] = clampDim(width, height);
+  // Keep the bottom edge (where the pet sits) at the same screen position
+  // — the pet canvas uses `align-items: flex-end`. Without this, setSize
+  // anchors to the top-left corner and the pet drifts.
+  mainWindow.setBounds({
+    x: x + Math.round((oldW - clampedW) / 2), // keep horizontal center
+    y: y + oldH - clampedH,                   // keep bottom edge
+    width: clampedW,
+    height: clampedH,
+  });
+  return { width: clampedW, height: clampedH };
+}
+
+/**
+ * Grow the window right/down while keeping the pet at the same screen
+ * position. The pet canvas is `justify-content: center;
+ * align-items: flex-end` — expanding right shifts the window left so the
+ * horizontal center doesn't move; expanding down shifts the window up so
+ * the bottom edge (where the pet sits) doesn't move.
+ *
+ * Returns the new size, or null if the window is gone.
+ */
+export function expandPetWindow(right: number, bottom: number): { width: number; height: number } | null {
+  if (!mainWindow) return null;
+  const [x, y] = mainWindow.getPosition();
+  const bounds = mainWindow.getBounds();
+  const newWidth = Math.max(bounds.width, bounds.width + right);
+  const newHeight = Math.max(bounds.height, bounds.height + bottom);
+  // Keep horizontal center and bottom edge in the same screen position.
+  const newX = x + Math.round(bounds.width / 2 - newWidth / 2);
+  const newY = y + bounds.height - newHeight;
+  mainWindow.setBounds({ x: newX, y: newY, width: newWidth, height: newHeight });
+  return { width: newWidth, height: newHeight };
 }
 
 /**

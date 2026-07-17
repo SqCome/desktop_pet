@@ -33,8 +33,14 @@ export async function mountLive2D(
   container: HTMLElement,
   modelUrl: string,
 ): Promise<Live2DHandle> {
-  const stageW = container.clientWidth;
-  const stageH = container.clientHeight;
+  // Fixed stage size — same as the max-width/max-height we impose on
+  // GIF/sequence frames. Live2D model renders at this resolution
+  // regardless of the container/window size, so the pet never grows
+  // when the user enlarges the window.
+  const STAGE_W = 320;
+  const STAGE_H = 360;
+  const stageW = STAGE_W;
+  const stageH = STAGE_H;
 
   const app = new PIXI.Application({
     width: stageW,
@@ -44,6 +50,14 @@ export async function mountLive2D(
     resolution: window.devicePixelRatio || 1,
     autoDensity: true,
   });
+  // Cap render frequency. PIXI's default ticker is tied to
+  // requestAnimationFrame and runs at the display's refresh rate (60/120/144
+  // Hz). On a 144 Hz display this means the GPU repaints the Live2D model
+  // 144 times per second even though the model itself only does subtle
+  // breathing motion — a transparent window with continuous invalidate is
+  // expensive on Windows DWM compositing. Capping at 30 fps cuts the
+  // repaint cost by 3-5x with no visible difference for a desktop pet.
+  app.ticker.maxFPS = 30;
   container.appendChild(app.view as HTMLCanvasElement);
 
   const model = (await Live2DModel.from(modelUrl, {
@@ -76,14 +90,33 @@ export async function mountLive2D(
 
   // Mouse-tracking eyes. Live2D's focus Y is "up" (positive = look up), but
   // the browser's clientY goes down — flip so the eyes follow naturally.
-  const onPointerMove = (e: PointerEvent) => {
+  //
+  // Throttle by collapsing moves into the next animation frame. A fast
+  // mouse can fire pointermove 200+ times per second; the focus() call is
+  // cheap individually but the cumulative cost on the renderer process
+  // adds up, and the value only matters at render time. Pushing into rAF
+  // means we compute focus at most once per frame (which is now capped
+  // to 30 fps above) — intermediate events are dropped silently.
+  let pendingPointer: { x: number; y: number } | null = null;
+  let focusScheduled = false;
+  const flushFocus = (): void => {
+    focusScheduled = false;
+    if (!pendingPointer) return;
+    const p = pendingPointer;
+    pendingPointer = null;
     const rect = (app.view as HTMLCanvasElement).getBoundingClientRect();
-    const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    const ny = ((e.clientY - rect.top) / rect.height) * 2 - 1;
+    const nx = ((p.x - rect.left) / rect.width) * 2 - 1;
+    const ny = ((p.y - rect.top) / rect.height) * 2 - 1;
     model.focus(
       Math.max(-1, Math.min(1, nx)),
       Math.max(-1, Math.min(1, -ny)),
     );
+  };
+  const onPointerMove = (e: PointerEvent): void => {
+    pendingPointer = { x: e.clientX, y: e.clientY };
+    if (focusScheduled) return;
+    focusScheduled = true;
+    requestAnimationFrame(flushFocus);
   };
   window.addEventListener('pointermove', onPointerMove);
 

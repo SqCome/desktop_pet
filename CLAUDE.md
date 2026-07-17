@@ -37,6 +37,7 @@ npm run clean        # rm -rf dist/
 3. **macOS 差异**:`app.dock?.hide()` + `setVisibleOnAllWorkspaces` + 窗口层级 `floating`,让宠物像"桌面上的东西"而非"应用窗口"。
 4. **single-instance lock**:重复启动 `app.quit()`,已有实例聚焦。Mac 上特别需要,因为没有可见 Dock 图标,容易让人误以为没启动。
 5. **拖拽实现**:不写自定义移动逻辑 —— `frame: false` + 鼠标事件不穿透,Electron 自动允许用户拖动窗口边界。要加"边缘吸附""锁定边界"再上 `pet:drag` 自定义事件 + 主进程 IPC。
+6. **Live2D 渲染限频**:`live2d.ts` 里 `app.ticker.maxFPS = 30`,`pointermove` 用 `requestAnimationFrame` 合并。144Hz 显示器下不做这两步会让透明窗口在 Windows DWM 合成上吃一个核。降到 30fps 肉眼几乎看不出区别,CPU 占用降到原来的 1/3-1/5。要恢复全帧率(给性能更好的机器)直接改这两处。
 6. **LLM 适配**:只支持 OpenAI 兼容协议(`/chat/completions` 流式)。OpenAI / DeepSeek / Moonshot / Ollama / LM Studio 都覆盖。Anthropic 协议不同,要加需另写 adapter。
 
 ## 添加新功能时的扩展点
@@ -51,4 +52,5 @@ npm run clean        # rm -rf dist/
 - 编译失败先看是哪个进程:`build:main` 还是 `build:renderer`。两者用不同配置,排查方向不同。
 - macOS 第一次运行可能弹出"无法验证开发者",需要系统设置 → 隐私与安全性 → 仍要打开。
 - `transparent: true` 在某些旧 GPU 驱动下会有黑边。可以在 `src/main/window.ts` 临时关掉排查。
+- 桌面宠物默认启用硬件 GPU 加速,Chromium 自己探测并 fallback。如果用户的驱动在 `transparent: true` 下不稳(GPU 进程反复崩),用 `PET_DISABLE_GPU=1 npm run dev` 强制走 SwiftShader 软件渲染作为兜底。**不要**再用旧的 `PET_GPU=1`(已废弃,效果等价于默认行为)。
 - esbuild 不会做 CSS 处理。`styles.css` 是手工 `copyFileSync` 过去的,改完要重启 dev 才会生效(`scripts/bundle-renderer.js` 一次性执行,没监听)。如果想要 CSS 热更新,加 chokidar 或换成 vite。

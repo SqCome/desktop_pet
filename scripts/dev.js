@@ -60,12 +60,21 @@ step('build renderer', 'node', ['scripts/bundle-renderer.js']);
 // Pass through PET_DEBUG so the user can run `set PET_DEBUG=1 && npm run dev`
 // in cmd or `$env:PET_DEBUG=1; npm run dev` in PowerShell without needing
 // a shell-specific env-var prefix.
+//
+// No --disable-gpu flag: Chromium gets to pick. If the user's GPU driver
+// is healthy (most modern Iris Xe / RTX / Apple Silicon), the GPU process
+// runs the compositor on hardware and CPU stays near zero. If the driver
+// is broken, Chromium itself detects the failure on the next launch and
+// falls back to SwiftShader — we don't need to force it.
+// Set PET_DISABLE_GPU=1 to force software rendering on demand.
 console.log('\n=== launch electron ===');
-const electron = spawn('npx', ['electron', '.', '--disable-gpu'], {
+const electronArgs = ['electron', '.'];
+if (process.env.PET_DISABLE_GPU === '1') electronArgs.push('--disable-gpu');
+const electron = spawn('npx', electronArgs, {
   cwd: root,
   stdio: 'inherit',
   shell: true,
-  env: process.env, // inherits PET_DEBUG from the parent shell
+  env: process.env, // inherits PET_DEBUG / PET_DISABLE_GPU from the parent shell
 });
 electron.on('exit', (code) => process.exit(code ?? 0));
 process.on('SIGINT', () => electron.kill('SIGINT'));

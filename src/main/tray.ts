@@ -2,7 +2,6 @@
 // pet window does NOT quit the app; quitting only happens via the tray's
 // "退出" entry (or Cmd+Q / Alt+F4 if you wire those up later).
 import { Tray, Menu, nativeImage, BrowserWindow, app } from 'electron';
-import * as path from 'node:path';
 import {
   startNotifyServer,
   stopNotifyServer,
@@ -10,14 +9,15 @@ import {
   installHooks,
   _getNotifyBus,
 } from './notify';
+import { buildTrayIconPng } from './tray-icon';
 
 let tray: Tray | null = null;
 
 export function createTray(getWindow: () => BrowserWindow | null): Tray {
-  // Empty 16x16 image — replace with a real icon at assets/tray.png.
-  // Using `nativeImage.createEmpty()` keeps the MVP runnable; on macOS you'll
-  // still see a placeholder in the menu bar.
-  const icon = nativeImage.createEmpty();
+  // Programmatic tray icon — generated at runtime, no asset file required.
+  // See tray-icon.ts for the design (pink-to-peach gradient + cat silhouette).
+  // We construct the NativeImage once and reuse it across menu rebuilds.
+  const icon = nativeImage.createFromBuffer(buildTrayIconPng());
   tray = new Tray(icon);
 
   const rebuild = () => {
@@ -90,8 +90,15 @@ export function createTray(getWindow: () => BrowserWindow | null): Tray {
     else win?.show();
   });
 
-  // Rebuild when window visibility changes (so "显示/隐藏" stays accurate).
-  setInterval(rebuild, 1000);
+  // Rebuild when window visibility changes so the "显示/隐藏" label stays
+  // accurate. Previous versions used setInterval(rebuild, 1000) — that
+  // re-allocated the native Menu and reissued NOTIFYICONDATA to the shell
+  // every second, pinning one CPU core on Windows.
+  const win = getWindow();
+  if (win) {
+    win.on('show', rebuild);
+    win.on('hide', rebuild);
+  }
 
   return tray;
 }

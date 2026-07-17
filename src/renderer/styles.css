@@ -35,11 +35,11 @@ html, body {
   z-index: 5;
 }
 #pet-canvas.reminder-zoom > :first-child {
-  /* Use `transform: scale()` (not the standalone `scale` property) so
-     `transform-origin` actually applies — anchoring at 50% 85% keeps
-     the pet's feet in place while the head lifts up, so the zoom
-     reads as "standing up taller" instead of "exploding outward". */
-  transform: scale(1.4);
+  /* Keep scale moderate (1.15×) so the browser's bicubic upscale is
+     barely noticeable — the original 1.4× stretched pixels too far
+     and turned blurry. The `transform-origin: 50% 85%` keeps the
+     pet's feet anchored so it reads as "standing up taller". */
+  transform: scale(1.15);
   transform-origin: 50% 85%;
   transition: transform 380ms cubic-bezier(0.2, 0.8, 0.2, 1),
               filter 380ms ease;
@@ -80,11 +80,13 @@ html, body {
 #pet-canvas .placeholder::before { left: 28%; }
 #pet-canvas .placeholder::after  { right: 28%; }
 
-/* Image-mode frames: fill the stage while preserving aspect ratio. */
+/* Image-mode frames: cap at the classic pet-viewport size so the pet
+   never grows larger regardless of window dimensions. A bigger window
+   just means more empty space around the pet. */
 #pet-canvas .gif-frame,
 #pet-canvas .sequence-frame {
-  max-width: 90%;
-  max-height: 90%;
+  max-width: 320px;
+  max-height: 360px;
   object-fit: contain;
   pointer-events: none; /* canvas itself owns the pointer events */
   filter: drop-shadow(0 6px 12px rgba(0,0,0,0.25));
@@ -304,21 +306,15 @@ html, body {
    ---------------------------------------------------------------------- */
 .settings-window {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 70%;
-  max-height: 480px;
+  inset: 0;
   background: rgba(252,252,252,0.92);
   backdrop-filter: blur(18px) saturate(140%);
   -webkit-backdrop-filter: blur(18px) saturate(140%);
-  border-top-left-radius: 18px;
-  border-top-right-radius: 18px;
   box-shadow: 0 -10px 32px rgba(0,0,0,0.18);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  z-index: 11; /* above chat-window if both are open */
+  z-index: 11;
   transform: translateY(100%);
   transition: transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
@@ -340,6 +336,7 @@ html, body {
   gap: 6px;
   font-size: 13px;
   color: #2c2330;
+  flex-shrink: 0; /* don't squash content; body scrolls instead */
 }
 .settings-field > span {
   font-weight: 600;
@@ -365,6 +362,28 @@ html, body {
   box-shadow: 0 0 0 3px rgba(255, 179, 198, 0.25);
 }
 .settings-field input::placeholder { color: #b09ba3; }
+
+/* Checkbox row in the settings form — inline label beside the checkbox
+   instead of the label-above-input pattern used for text fields. */
+.settings-checkbox-row {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+.settings-checkbox-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #ffb3c6;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.settings-checkbox-row > span {
+  font-weight: 500;
+  font-size: 13px;
+  color: #2c2330;
+  cursor: pointer;
+}
 
 .settings-actions {
   display: flex;
@@ -407,6 +426,7 @@ html, body {
   font-size: 14px;
   font-weight: 700;
   color: #6b2a3f;
+  flex-shrink: 0;
   margin: 4px 0 2px;
   padding-top: 10px;
   border-top: 1px solid rgba(255,179,198,0.3);
@@ -488,12 +508,7 @@ html, body {
 
 .menu {
   position: absolute;
-  top: 8px;
-  left: 8px;
-  /* Lift above #pet-canvas (z-index 1) and chat-window (z-index 10) so the
-     context menu buttons actually receive hits when the cursor is over
-     them. Without an explicit z-index the menu was a sibling of the
-     canvas and the lower-stacked hit area swallowed clicks. */
+  /* top/left set dynamically by menu.ts at click position */
   z-index: 100;
   pointer-events: auto;
   display: flex;
@@ -504,6 +519,8 @@ html, body {
   border-radius: 10px;
   box-shadow: 0 6px 20px rgba(0,0,0,0.18);
   font-size: 13px;
+  max-height: min(320px, 80vh);
+  overflow-y: auto;
 }
 .menu.hidden { display: none; }
 .menu button {
@@ -794,11 +811,11 @@ html, body {
 .bubble-notify {
   background: linear-gradient(135deg, #ffe6f2 0%, #fff7e6 100%);
   border: 2px solid #ff9ec0;
-  padding: 10px 14px;
+  padding: 8px 12px;
   border-radius: 12px;
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(255, 158, 192, 0.4);
-  max-width: 240px;
+  max-width: 220px;
   /* Use transition (not animation) so it composes with `.bubble.visible`'s
      transition. animation's fill-mode=none would otherwise revert the
      element to base styles when the keyframe ends, briefly flashing
@@ -809,14 +826,25 @@ html, body {
 
 .bubble-notify .bubble-title {
   font-weight: 700;
-  font-size: 13px;
+  font-size: 12px;
   color: #d6336c;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
+  line-height: 1.3;
+}
+
+/* Inline project suffix on the title line — e.g. "Claude Code 任务完成 · desktop_pet".
+   Muted weight and color so it reads as metadata, not competing with the
+   main message. Sits inside the title text node, no extra row needed. */
+.bubble-notify .bubble-project-suffix {
+  font-weight: 500;
+  color: #868e96;
+  font-size: 11px;
 }
 
 .bubble-notify .bubble-body {
-  font-size: 12px;
+  font-size: 11px;
   color: #495057;
+  line-height: 1.35;
 }
 
 .bubble-notify.kind-permission_request { border-color: #ff6b6b; }
@@ -833,4 +861,127 @@ html, body {
 @keyframes bubble-pop-in {
   from { opacity: 0; transform: translateY(8px) scale(0.9); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* ----------------------------------------------------------------------
+   Task checklist panel
+   One section per Claude Code agent (main + subagents). Updated in place
+   by renderer/notify.ts when TodoWrite / TaskCreated / TaskCompleted
+   hooks fire. Hidden via context menu.
+   Positioned top-LEFT — bubbles emerge from the bottom-center (above
+   the chat panel) and the chat / settings windows anchor top-right,
+   so the left side is the only zone that doesn't fight other UI.
+   ---------------------------------------------------------------------- */
+.todo-panel {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  max-width: 240px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  z-index: 4;
+  /* Hidden until first update arrives OR user explicitly toggled on. */
+  opacity: 0;
+  transform: translateX(-8px);
+  transition: opacity 220ms ease, transform 220ms ease;
+  pointer-events: none;
+  font-size: 12px;
+  user-select: none;
+}
+
+.todo-panel.visible {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+/* When user toggles via menu, hide via .hidden (separate from .visible
+   so the entrance/exit transition still runs cleanly). */
+.todo-panel.hidden {
+  opacity: 0;
+  transform: translateX(-8px);
+  pointer-events: none;
+}
+
+.todo-section {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.todo-section-header {
+  font-weight: 600;
+  font-size: 11px;
+  color: #495057;
+  margin-bottom: 6px;
+  letter-spacing: 0.02em;
+  cursor: grab;
+}
+.todo-section-header:active {
+  cursor: grabbing;
+}
+
+.todo-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.todo-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  line-height: 1.4;
+  color: #212529;
+}
+
+.todo-icon {
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.todo-content {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.todo-completed .todo-content {
+  text-decoration: line-through;
+  color: #adb5bd;
+}
+.todo-completed .todo-icon {
+  color: #51cf66;
+}
+
+/* In-progress: spinner uses CSS animation, no extra DOM nodes needed.
+   The ⏳ emoji renders as a single glyph on every platform — no font
+   fallback surprises. */
+.todo-in-progress .todo-icon {
+  color: #fab005;
+  display: inline-block;
+  animation: todo-spin 1.4s linear infinite;
+  transform-origin: 50% 56%;
+}
+
+.todo-in-progress .todo-content {
+  color: #495057;
+  font-weight: 500;
+}
+
+.todo-pending .todo-icon {
+  color: #ced4da;
+}
+
+@keyframes todo-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
 }

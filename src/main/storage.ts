@@ -71,6 +71,25 @@ const migrations: Record<number, Migration> = {
     cfg.configVersion = 4;
     return cfg;
   },
+  // v4 -> v5: add windowWidth / windowHeight. Existing configs inherit
+  // the 500×480 default from DEFAULT_CONFIG via the shallow merge in
+  // loadConfig; writing them here ensures a user who has never opened
+  // settings still gets explicit fields they can edit.
+  4: (cfg) => {
+    cfg.windowWidth = typeof cfg.windowWidth === 'number' && cfg.windowWidth >= 300 && cfg.windowWidth <= 4000
+      ? cfg.windowWidth : 500;
+    cfg.windowHeight = typeof cfg.windowHeight === 'number' && cfg.windowHeight >= 300 && cfg.windowHeight <= 4000
+      ? cfg.windowHeight : 480;
+    cfg.configVersion = 5;
+    return cfg;
+  },
+  // v5 -> v6: add autoStart (default false). The user hasn't opted in yet.
+  // app.setLoginItemSettings is called during boot in index.ts.
+  5: (cfg) => {
+    cfg.autoStart = cfg.autoStart === true;
+    cfg.configVersion = 6;
+    return cfg;
+  },
 };
 
 function migrate(parsed: any, fromVersion: number): any {

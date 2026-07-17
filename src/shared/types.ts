@@ -15,8 +15,11 @@
  *      service (Go remindersd backend).
  *  v4: added claudeCodeNotify { serviceEnabled, hooksInstalled } for the
  *      Claude Code hook bridge (HTTP server + ~/.claude/settings.json hooks).
+ *  v5: added windowWidth + windowHeight so users can resize the pet window
+ *      from settings without losing the pet's visual scale.
+ *  v6: added autoStart for OS-level login-item (app.setLoginItemSettings).
  */
-export const CURRENT_CONFIG_VERSION = 4;
+export const CURRENT_CONFIG_VERSION = 6;
 
 /**
  * Two independent switches for the Claude Code hook bridge:
@@ -53,6 +56,12 @@ export interface AppConfig {
   maxFps: number;
   /** Start the app hidden in the tray. */
   startHidden: boolean;
+  /** Launch on OS login (app.setLoginItemSettings). */
+  autoStart: boolean;
+  /** Pet window width in pixels. Configurable via settings. */
+  windowWidth: number;
+  /** Pet window height in pixels. Configurable via settings. */
+  windowHeight: number;
   /** Pet rendering mode. */
   pet: PetRenderConfig;
   /** LLM provider configuration. */
@@ -158,6 +167,9 @@ export const DEFAULT_CONFIG: AppConfig = {
   alwaysOnTop: true,
   maxFps: 60,
   startHidden: false,
+  autoStart: false,
+  windowWidth: 500,
+  windowHeight: 480,
   pet: {
     mode: 'auto',
     assetDir: 'pet',
@@ -195,6 +207,13 @@ export const IPC = {
   CHAT_HISTORY: 'chat:history',
   CONFIG_GET: 'config:get',
   CONFIG_SET: 'config:set',
+  /** Renderer asks main to resize the window and return the old size.
+   * Used by settings panel to grow the window temporarily so the form
+   * displays fully, then restore on close. */
+  CONFIG_SET_WINDOW_SIZE: 'config:set-window-size',
+  /** Renderer requests app exit. Maps to app.exit(0) so the app fully
+   * terminates — vs. window.close() which only hides to the tray. */
+  APP_QUIT: 'app:quit',
   PET_DRAG: 'pet:drag',
   PET_INTERACTION: 'pet:interaction',
   /** Renderer asks main to move the BrowserWindow to the center of the
@@ -205,6 +224,12 @@ export const IPC = {
    * reminder so the (scaled-up) pet has room to render without being
    * clipped by the default 320×360 chrome. */
   PET_RESIZE: 'pet:resize',
+  /** Grow the window by (right, bottom) pixels while keeping the pet at
+   * the same screen position. The pet is centered horizontally and
+   * bottom-anchored — expanding right shifts the window left so the
+   * center doesn't move; expanding down shifts the window up so the
+   * bottom edge doesn't move. */
+  PET_EXPAND: 'pet:expand',
   /** Renderer asks main to snapshot the current window geometry so it
    * can restore the user's original drag-to position after a reminder
    * dismisses (without forcing the window back to screen center). */
@@ -279,14 +304,73 @@ export type Reminder = {
  * `kind` is one of four normalized event types; everything else from
  * Claude Code is dropped in normalizeHook().
  */
+/**
+ * One todo entry as the agent updates its TodoWrite checklist. Mirrors
+ * Claude Code's TodoWrite payload shape (content, status, activeForm).
+ * `activeForm` is the present-tense version of `content` shown while the
+ * task is in progress (e.g. content="修 bug" / activeForm="正在修 bug");
+ * we surface both — content as the row label, activeForm as the spinner
+ * tooltip while in_progress.
+ *
+ * For TaskCreated/TaskCompleted hooks we synthesize TodoItem entries from
+ * `task_id` / `task_subject` / `task_description`. We tag them with
+ * `taskId` so the renderer can dedupe across multiple events for the
+ * same logical task (TaskCreated fires once, TaskCompleted fires once,
+ * no other events mention it).
+ */
+export type TodoItem = {
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed';
+  activeForm?: string;
+  /** Set for entries derived from Task* hooks; lets renderer dedupe. */
+  taskId?: string;
+};
+
 export type NotifyPayload = {
   /** Used for dedup. Provided by Claude Code, fallback = random. */
   sessionId: string;
-  kind: 'permission_request' | 'idle_prompt' | 'stop' | 'subagent_stop';
+  kind: 'permission_request' | 'idle_prompt' | 'stop' | 'subagent_stop' | 'todo_update';
   /** Rendered as bubble title (main pre-formats the Chinese text). */
   title: string;
   /** Bubble body, <= 80 chars. */
   body: string;
+  /**
+   * Project directory name derived from `transcript_path` (e.g.
+   * `desktop_pet` for `E:\desktop_pet`). Lets the bubble disambiguate which
+   * project the hook fired for when the user has multiple Claude Code
+   * sessions running.
+   */
+  project?: string;
+  /**
+   * Short hint about what the agent just finished or is waiting on.
+   * For `stop` / `subagent_stop`: last assistant message, truncated to
+   * <= 60 chars. For `permission_request`: tool name + brief reason.
+   * For `idle_prompt`: empty (the prompt itself is the cue).
+   */
+  taskHint?: string;
+  /**
+   * For `todo_update` only: the full checklist after the latest TodoWrite
+   * call. Renderer replaces its panel state with this array (no diffing on
+   * our side — Claude Code sends the canonical list each time).
+   *
+   * For TaskCreated/TaskCompleted, this is a single-item array containing
+   * one synthesized TodoItem — the renderer accumulates these into its
+   * per-agent map keyed by `taskId`.
+   */
+  todos?: TodoItem[];
+  /**
+   * Claude Code's per-agent identifier. Main agent = 'main'; subagents use
+   * 'agent-<uuid>' for general-purpose ones. `sessionId` alone is NOT
+   * enough to disambiguate: a single session can run main + many subagents
+   * in parallel, each with its own TodoWrite list.
+   */
+  agentId?: string;
+  /**
+   * Human-readable agent type. Main = 'main'; subagents get values like
+   * 'general-purpose', 'Explore', 'Plan'. Used as a panel header label so
+   * the user can tell at a glance which agent's checklist they're reading.
+   */
+  agentType?: string;
   /** Optional context for the click handler (currently unused by focusPet). */
   focusHint?: { kind: 'ide' | 'terminal'; value: string };
   /** ms epoch. */

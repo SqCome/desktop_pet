@@ -1,55 +1,124 @@
 name: Build
 
+# Build installers on tag pushes (v0.1.0, v1.2.3, …).
+#
+# Matrix:
+#   - macos-latest   → DesktopPet-<ver>-arm64.dmg + DesktopPet-<ver>-x64.dmg
+#   - ubuntu-latest  → remindersd-linux-amd64 + remindersd-linux-arm64
+#
+# Windows builds are intentionally not run from CI — the windows-latest
+# runner injects WIN_CSC_LINK into the workspace path and electron-builder
+# 24.13.3 reads it before signAndEditExecutable takes effect, so the
+# signing check errors out. To produce a Windows installer, run
+# `npm run pack:win` locally on a Windows machine.
+#
+# Artifacts are uploaded to both:
+#   - GitHub Actions artifacts (kept 30 days, for in-CI debugging)
+#   - The matching GitHub Release (kept forever, for download links)
+#
+# Code signing is optional — without secrets the installers work but show
+# OS warnings on first launch. See README for the user-side workaround
+# and `repo Settings → Secrets` for the signing variable names.
+
 on:
   push:
     tags:
       - 'v*'
 
+# Default GITHUB_TOKEN has read-only repo scope. We need write to publish
+# release artifacts via softprops/action-gh-release.
+permissions:
+  contents: write
+
 jobs:
-  build-windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: '20' }
-      - run: npm ci
-      - run: npm run pack
-        env:
-          CSC_LINK: ''
-          CSC_KEY_PASSWORD: ''
-          ELECTRON_BUILDER_ALLOW_UNRESOLVED_DEPENDENCIES: 'true'
-      - uses: actions/upload-artifact@v4
-        with:
-          name: DesktopPet-Windows
-          path: release/*.exe
-
   build-macos:
+    name: macOS installers (${{ matrix.arch }})
     runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x64]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: '20' }
-      - uses: actions/setup-go@v5
-        with: { go-version: '1.22' }
-      - run: npm ci
-      - run: npm run pack
-        env:
-          CSC_LINK: ''
-          CSC_KEY_PASSWORD: ''
-      - uses: actions/upload-artifact@v4
-        with:
-          name: DesktopPet-macOS
-          path: release/*.dmg
 
-  # 编译 remindersd 服务端,跑在你公网服务器上(Linux amd64)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (main + renderer + reminders server)
+        run: npm run build
+
+      - name: Pack macOS installer (${{ matrix.arch }})
+        env:
+          ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
+        # Wrapper strips signing env vars from the child process so
+        # electron-builder skips signing entirely. See scripts/build-no-sign.js.
+        run: node scripts/build-no-sign.js --mac --${{ matrix.arch }} --publish never
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/DesktopPet-*-${{ matrix.arch }}.dmg
+            release/DesktopPet-*-${{ matrix.arch }}.dmg.blockmap
+          fail_on_unmatched_files: false
+
+      - name: Upload artifact (debug)
+        uses: actions/upload-artifact@v4
+        with:
+          name: DesktopPet-macOS-${{ matrix.arch }}
+          path: |
+            release/DesktopPet-*-${{ matrix.arch }}.dmg
+            release/DesktopPet-*-${{ matrix.arch }}.dmg.blockmap
+
   build-remindersd:
+    name: remindersd (${{ matrix.goos }}/${{ matrix.goarch }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-go@v5
-        with: { go-version: '1.22' }
-      - run: cd server && go build -o remindersd-linux-amd64 ./cmd/remindersd
-      - uses: actions/upload-artifact@v4
         with:
-          name: remindersd-linux
-          path: server/remindersd-linux-amd64
+          go-version: '1.22'
+          cache: true
+
+      - name: Build remindersd
+        working-directory: server
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: |
+          mkdir -p ../dist/server
+          go build -trimpath \
+            -ldflags="-s -w" \
+            -o ../dist/server/remindersd-${{ matrix.goos }}-${{ matrix.goarch }} \
+            ./cmd/remindersd
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/server/remindersd-${{ matrix.goos }}-${{ matrix.goarch }}
+          fail_on_unmatched_files: false
+
+      - name: Upload artifact (debug)
+        uses: actions/upload-artifact@v4
+        with:
+          name: remindersd-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/server/remindersd-${{ matrix.goos }}-${{ matrix.goarch }}
